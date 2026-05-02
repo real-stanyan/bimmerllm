@@ -1,169 +1,192 @@
 // app/api/chat/route.ts
-import { NextResponse } from "next/server";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { Pinecone } from "@pinecone-database/pinecone";
+//
+// Implementation path: PATH A (preferred per plan)
+// Uses createUIMessageStream + createUIMessageStreamResponse from ai@5.0.98.
+// Sources emitted as a `data-sources` chunk BEFORE the text stream starts.
+// Client reads sources from message.parts (DataUIPart with type "data-sources").
+//
+// Verified that createUIMessageStream, createUIMessageStreamResponse,
+// streamText, and convertToModelMessages are all exported from ai@5.0.98.
+
 import { traceable } from "langsmith/traceable";
+import {
+  streamText,
+  type UIMessage,
+  convertToModelMessages,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+} from "ai";
+import { aiSdkGoogle, GEMINI_MODEL_ID, langchainGemini } from "@/lib/ai/google";
+import { bimmerpostNamespace } from "@/lib/ai/pinecone";
+import type { SourceCitation } from "@/lib/conversation";
 
 export const runtime = "nodejs";
+export const maxDuration = 60;
 
-// === 接口定义 ===
-export interface SearchFields {
-  answers?: string;
-  [key: string]: any;
-}
-
-export interface SearchHit {
+interface SearchHit {
   _id: string;
   _score: number;
-  fields: SearchFields;
+  fields?: { answers?: string };
+}
+interface SearchResponse {
+  result?: { hits: SearchHit[] };
 }
 
-export interface SearchResult {
-  hits: SearchHit[];
+interface ChatBody {
+  messages: UIMessage[];
+  vehicleContext?: string;
 }
 
-export interface SearchUsage {
-  readUnits: number;
-  embedTotalTokens?: number;
+function extractText(m: UIMessage): string {
+  // AI SDK v5 messages have parts; older entries may carry raw content.
+  const anyM = m as unknown as {
+    content?: string;
+    parts?: { type: string; text?: string }[];
+  };
+  if (anyM.parts && Array.isArray(anyM.parts)) {
+    return anyM.parts
+      .filter((p) => p.type === "text")
+      .map((p) => p.text ?? "")
+      .join("");
+  }
+  return anyM.content ?? "";
 }
 
-export interface SearchResponse {
-  result: SearchResult;
-  usage?: SearchUsage;
-}
+const reformulate = traceable(
+  async (
+    currentQuestion: string,
+    history: UIMessage[],
+    vehicleContext: string
+  ) => {
+    const vehicleHint =
+      vehicleContext === "Auto-detect" || !vehicleContext
+        ? "no specific vehicle"
+        : vehicleContext;
 
-// === 初始化 LLM & Pinecone ===
-const llm = new ChatGoogleGenerativeAI({
-  model: "gemini-2.5-flash-lite",
-  apiKey: process.env.GEMINI_API_KEY!,
-  temperature: 0.2,
-});
+    const prompt =
+      history.length === 0
+        ? `Translate the following BMW question to an English search query for a forum knowledge base.
+User's vehicle context: ${vehicleHint}.
+Question: ${currentQuestion}
+Output ONLY the English query string.`
+        : `Given the following conversation history and a follow-up question, rephrase the follow-up to a standalone English search query for a BMW forum knowledge base.
+User's vehicle context: ${vehicleHint}.
 
-const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY! });
-const namespace = pc.index("bmw-datas").namespace("bimmerpost");
+Chat history:
+${history.map((m) => `${m.role}: ${extractText(m)}`).join("\n")}
 
-// === 真正的处理函数 ===
-async function handler(req: Request) {
-  try {
-    const { messages } = await req.json();
+Follow-up: ${currentQuestion}
 
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return NextResponse.json(
-        { error: "messages array is required" },
-        { status: 400 }
-      );
-    }
+Output ONLY the English query string.`;
 
-    const lastMessage = messages[messages.length - 1];
-    const historyMessages = messages.slice(0, -1);
-    const currentQuestion = lastMessage.content as string;
-
-    // === 1. 生成 searchInput ===
-    let searchInput = currentQuestion;
-
-    if (historyMessages.length > 0) {
-      const reformulatePrompt = `
-        Given the following conversation history and a follow-up question,
-        rephrase the follow-up question to be a **standalone English search query**.
-        
-        Chat History:
-        ${historyMessages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}
-        
-        Follow-up Input: ${currentQuestion}
-        
-        Instructions:
-        1. Combine the history context with the new input.
-        2. Translate the core intent into English for a database search.
-        3. Output ONLY the English query string, nothing else.
-      `;
-
-      const reformulateRes = await llm.invoke([
-        { role: "user", content: reformulatePrompt },
+    try {
+      const res = await langchainGemini.invoke([
+        { role: "user", content: prompt },
       ]);
-      searchInput = reformulateRes.content?.toString().trim() || "";
-    } else {
-      const transRes = await llm.invoke(
-        `Translate this into English for search: "${currentQuestion}". Only output English.`
-      );
-      searchInput = transRes.content?.toString().trim() || "";
+      return res.content?.toString().trim() || currentQuestion;
+    } catch (err) {
+      console.error("[reformulate] failed, falling back to raw question:", err);
+      return currentQuestion;
+    }
+  },
+  { name: "reformulate" }
+);
+
+const retrieve = traceable(
+  async (searchInput: string): Promise<SourceCitation[]> => {
+    try {
+      const ns = bimmerpostNamespace();
+      const response = (await ns.searchRecords({
+        query: { topK: 5, inputs: { text: searchInput } },
+        fields: ["answers"],
+      })) as unknown as SearchResponse;
+
+      const hits = response.result?.hits ?? [];
+      return hits.map((h) => ({
+        id: h._id,
+        score: h._score,
+        preview: (h.fields?.answers ?? "").slice(0, 240),
+      }));
+    } catch (err) {
+      console.error("[retrieve] Pinecone search failed:", err);
+      return [];
+    }
+  },
+  { name: "retrieve" }
+);
+
+const handler = traceable(
+  async (req: Request) => {
+    const body = (await req.json()) as ChatBody;
+    const messages = body.messages ?? [];
+    const vehicleContext = body.vehicleContext || "Auto-detect";
+
+    if (messages.length === 0) {
+      return new Response(JSON.stringify({ error: "messages array required" }), {
+        status: 400,
+      });
     }
 
-    // === 2. Pinecone 检索 ===
-    const response = (await namespace.searchRecords({
-      query: { topK: 5, inputs: { text: searchInput } },
-      fields: ["answers"],
-    })) as unknown as SearchResponse;
+    const last = messages[messages.length - 1];
+    const history = messages.slice(0, -1);
+    const currentQuestion = extractText(last);
 
-    const topMatches = response.result?.hits || [];
+    const searchInput = await reformulate(currentQuestion, history, vehicleContext);
+    const sources = await retrieve(searchInput);
+
     const contextText =
-      topMatches.length > 0
-        ? topMatches.map((m: any) => m.fields?.answers).join("\n\n---\n\n")
-        : "No relevant documents found.";
+      sources.length > 0
+        ? sources.map((s) => s.preview).join("\n\n---\n\n")
+        : "参考资料库暂时无法访问。请基于你已有的 BMW 知识谨慎回答。";
 
-    // === 3. 拼最终 prompt ===
-    const finalPrompt = `
-      你是一个专业的 BMW 技术顾问。请基于下方的【参考资料】回答用户的最新问题。
-      
-      【参考资料 (来源: 论坛数据)】:
-      ${contextText}
-      
-      【对话历史】:
-      ${historyMessages
-        .map((m: any) => `${m.role === "user" ? "用户" : "AI"}: ${m.content}`)
-        .join("\n")}
-      
-      【用户最新问题】:
-      ${currentQuestion}
-      
-      **要求**:
-      1. 使用中文回答。
-      2. 优先依据【参考资料】的内容。如果资料里没有，请说明。
-      3. 结合【对话历史】理解用户的语境（例如用户说"它"指代之前的车型）。
-      4. 保持对话风格自然。
-    `;
+    const vehicleHint =
+      vehicleContext === "Auto-detect" || !vehicleContext
+        ? "用户未指定具体车型"
+        : vehicleContext;
 
-    // === 4. 流式输出 ===
-    const encoder = new TextEncoder();
-    const { readable, writable } = new TransformStream();
+    const system = `你是一个专业的 BMW 技术顾问。
+用户车辆背景: ${vehicleHint}
+请基于下方【参考资料】回答用户的最新问题。
+- 优先依据参考资料；资料里没有的内容明确说"参考资料中未涉及"。
+- 用户车辆相关的部分要针对那个车型给具体建议。
+- 用中文回答。
 
-    (async () => {
-      const writer = writable.getWriter();
-      try {
-        const stream = await llm.stream([
-          { role: "user", content: finalPrompt },
-        ]);
+【参考资料 (来源: bimmerpost 论坛)】:
+${contextText}`;
 
-        for await (const chunk of stream) {
-          const text = chunk.content?.toString() ?? "";
-          if (!text) continue;
-          await writer.write(encoder.encode(text));
-        }
-      } catch (err) {
-        console.error("Streaming error:", err);
-        await writer.write(
-          encoder.encode("（回答过程中发生错误，请稍后重试）")
-        );
-      } finally {
-        writer.close();
-      }
-    })();
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        // Emit sources annotation BEFORE the text stream begins.
+        // The type cast is required because the default UIMessage generic does not
+        // carry typed DATA_TYPES — at runtime `data-${string}` is accepted by the
+        // stream writer; the cast keeps TypeScript happy.
+        (writer as { write: (chunk: unknown) => void }).write({
+          type: "data-sources",
+          data: { type: "sources", sources },
+          transient: false,
+        });
 
-    return new NextResponse(readable, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache",
+        const result = streamText({
+          model: aiSdkGoogle(GEMINI_MODEL_ID),
+          system,
+          messages: convertToModelMessages(messages),
+          temperature: 0.2,
+          onError: (err) => console.error("[generate] streamText error:", err),
+        });
+
+        writer.merge(result.toUIMessageStream());
+      },
+      onError: (err) => {
+        console.error("[stream] error:", err);
+        return "（回答过程中发生错误，请稍后重试）";
       },
     });
-  } catch (e: any) {
-    console.error(e);
-    return NextResponse.json({ error: e.message }, { status: 500 });
-  }
+
+    return createUIMessageStreamResponse({ stream });
+  },
+  { name: "bmw-rag-route" }
+);
+
+export async function POST(req: Request) {
+  return handler(req);
 }
-
-// === 用 LangSmith trace 包一层 ===
-const tracedPost = traceable(handler, {
-  name: "bmw-rag-route",
-});
-
-export { tracedPost as POST };

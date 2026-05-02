@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@ai-sdk/google": "^3.0.67",
+    "@ai-sdk/google": "^2.0.72",
     "@google/generative-ai": "^0.24.1",
     "@huggingface/inference": "^4.13.3",
     "@langchain/community": "^1.0.3",
