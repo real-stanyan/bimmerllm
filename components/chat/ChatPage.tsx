@@ -3,11 +3,14 @@
 // AI SDK API surface notes (vs plan assumptions):
 //
 // PLAN ASSUMED:          ACTUAL @ai-sdk/react@^3 + ai@6 API:
-// useChat({ api, body }) useChat({ chat }) where chat = new Chat({ transport: new DefaultChatTransport({ api, body }) })
+// useChat({ api, body }) useChat({ transport: new DefaultChatTransport({ api, body }), ... })
 //                        → api/body are NOT top-level on useChat; they live on the transport.
-//                        → Resolution: upgraded root ai@5 → ai@6.0.174 so both packages share the same version.
-//                        → body is a Resolvable<object> function (called on each request) so vehicleContext
-//                          stays current without recreating the transport.
+//                        → Resolution: upgraded root ai@5 → ai@6.0.174 to match @ai-sdk/react.
+//                        → body is a Resolvable<object> function (called on each request) so
+//                          vehicleContext stays current without recreating the transport.
+// useChat({ chat, onFinish })  — when passing a `chat` object, `onFinish` is IGNORED by useChat!
+//                        → Fix: pass `onFinish` to the Chat constructor instead. Use a ref to
+//                          capture the latest callback so the stable Chat object picks it up.
 // onFinish: ({ message }) onFinish: ({ message, messages, isAbort, isDisconnect, isError, finishReason })
 //                        → same `message` field, richer callback shape.
 // sendMessage({ text })  sendMessage({ text }) ✓ — same
@@ -21,7 +24,7 @@
 //   We read it via message.parts[] filtering for type === "data-sources".
 
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat, Chat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useChat as useChatStore } from "@/components/chat-provider";
@@ -74,6 +77,17 @@ export function ChatPage() {
   // vehicleContextRef lets the transport body function always see the latest value
   const vehicleContextRef = useRef(vehicleContext);
 
+  // Keep refs stable for the Chat constructor's onFinish callback
+  const activeConversationRef = useRef(activeConversation);
+  const persistMessagesRef = useRef(persistMessages);
+  const updateActiveConversationRef = useRef(updateActiveConversation);
+
+  // Update refs on every render so the stable onFinish callback sees latest values
+  activeConversationRef.current = activeConversation;
+  persistMessagesRef.current = persistMessages;
+  updateActiveConversationRef.current = updateActiveConversation;
+  vehicleContextRef.current = vehicleContext;
+
   useEffect(() => {
     setShowSources(readPreferences().citations);
   }, []);
@@ -84,23 +98,77 @@ export function ChatPage() {
     vehicleContextRef.current = model;
   }, [activeConversation?.id, activeConversation?.model]);
 
-  // Keep ref in sync with state on every render
-  vehicleContextRef.current = vehicleContext;
-
   const initialMessages = useMemo(
     () => (activeConversation?.messages ?? []).map(toAiMessage),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeConversation?.id]
   );
 
+  // Stable onFinish callback — reads from refs so it never needs to be re-created.
+  // IMPORTANT: onFinish must be passed to the Chat constructor, NOT to useAiChat.
+  // When { chat } is passed to useAiChat, useAiChat ignores its own onFinish option.
+  const onFinish = useCallback(({ message, messages: allAiMessages }: {
+    message: AiUiMessage;
+    messages: AiUiMessage[];
+    isAbort?: boolean;
+    isDisconnect?: boolean;
+    isError?: boolean;
+  }) => {
+    const conv = activeConversationRef.current;
+    if (!conv) return;
+
+    const finishedAt = Date.now();
+    const latencyMs = streamStartRef.current ? finishedAt - streamStartRef.current : undefined;
+    streamStartRef.current = null;
+
+    // Extract sources from the finished message's DataUIPart
+    const rawSources = extractSources(message);
+    const sources = parseSourcesAnnotation(rawSources) ?? undefined;
+
+    // allAiMessages is the full conversation state after the turn completes
+    // It already includes the assistant message, so use it directly
+    const allMessages = allAiMessages.length > 0
+      ? allAiMessages
+      : [...([] as AiUiMessage[]), message];
+    const stored = allMessages.map(fromAiMessage);
+
+    // Attach latency, token estimate, and sources to the last assistant message
+    const lastIdx = stored.length - 1;
+    if (stored[lastIdx]?.role === "model") {
+      stored[lastIdx] = {
+        ...stored[lastIdx],
+        sources,
+        latencyMs,
+        tokenCount: Math.ceil(stored[lastIdx].content.length / 4),
+      };
+    }
+
+    persistMessagesRef.current(conv.id, stored);
+
+    // Title rule: derive from first user msg if still default
+    if (conv.title === "New consultation") {
+      const firstUser = stored.find(m => m.role === "user");
+      if (firstUser) {
+        updateActiveConversationRef.current(c => ({ ...c, title: firstUser.content.slice(0, 50) }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Create the Chat object once per conversation mount (key= remount handles conv switches).
   // body is a Resolvable function so vehicleContext is always current without recreating the transport.
+  // onFinish is passed HERE (not to useAiChat) because useAiChat ignores onFinish when { chat } is provided.
   const chat = useMemo(() => {
     const transport = new DefaultChatTransport({
       api: "/api/chat",
       body: () => ({ vehicleContext: vehicleContextRef.current ?? "Auto-detect" }),
     });
-    return new Chat({ transport, messages: initialMessages });
+    return new Chat({
+      transport,
+      messages: initialMessages,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onFinish: onFinish as any,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -110,47 +178,7 @@ export function ChatPage() {
     status,
     stop,
     regenerate,
-  } = useAiChat({
-    chat,
-    onFinish: ({ message }) => {
-      if (!activeConversation) return;
-      const finishedAt = Date.now();
-      const latencyMs = streamStartRef.current ? finishedAt - streamStartRef.current : undefined;
-      streamStartRef.current = null;
-
-      // Extract sources from the finished message's parts (data-sources DataUIPart)
-      const rawSources = extractSources(message);
-      const sources = parseSourcesAnnotation(rawSources) ?? undefined;
-
-      // Map all current aiMessages + the final message to StoredMessage[]
-      const currentAi = aiMessages as AiUiMessage[];
-      // The onFinish message may already be in aiMessages; avoid duplicating
-      const alreadyIncluded = currentAi.some(m => m.id === (message as AiUiMessage).id);
-      const allMessages = alreadyIncluded ? currentAi : [...currentAi, message as AiUiMessage];
-      const stored = allMessages.map(fromAiMessage);
-
-      // Attach latency, token estimate, and sources to the last assistant message
-      const lastIdx = stored.length - 1;
-      if (stored[lastIdx]?.role === "model") {
-        stored[lastIdx] = {
-          ...stored[lastIdx],
-          sources,
-          latencyMs,
-          tokenCount: Math.ceil(stored[lastIdx].content.length / 4),
-        };
-      }
-
-      persistMessages(activeConversation.id, stored);
-
-      // Title rule: derive from first user msg if still default
-      if (activeConversation.title === "New consultation") {
-        const firstUser = stored.find(m => m.role === "user");
-        if (firstUser) {
-          updateActiveConversation(c => ({ ...c, title: firstUser.content.slice(0, 50) }));
-        }
-      }
-    },
-  });
+  } = useAiChat({ chat });
 
   const streaming = status === "streaming" || status === "submitted";
 
