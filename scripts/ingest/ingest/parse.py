@@ -274,3 +274,140 @@ def parse_forum_listing_page(html: str, forum_id: int) -> ForumPage:
             has_next = current < total_pages
 
     return ForumPage(threads=threads, total_pages=total_pages, has_next=has_next)
+
+
+class Post(TypedDict):
+    author: str | None
+    posted_at: str | None
+    text: str
+
+
+class ThreadPage(TypedDict):
+    posts: list[Post]
+    total_pages: int
+    has_next: bool
+
+
+_POST_TABLE_ID_RE = re.compile(r"^post\d+$")
+_POST_LI_ID_RE = re.compile(r"^post_\d+$")
+_POST_ID_DIGITS_RE = re.compile(r"^post_?(\d+)$")
+
+
+def _strip_post_chrome(post_html_root) -> None:
+    """Mutate the BeautifulSoup post-message subtree, removing
+    quote blocks, signatures, attachments, and edit timestamps.
+
+    The bimmerpost theme uses ``div.quotePost`` for quote wrappers
+    (not ``div.bbcode_quote`` like stock vBulletin). Keep the
+    stock-vB selectors too so this is forward-compatible if the
+    theme ever changes.
+    """
+    for sel in [
+        "div.quotePost",                 # bimmerpost theme quote wrapper
+        "div.bbcode_container",          # stock vBulletin quote wrapper
+        "div.bbcode_quote",
+        "table.quote",
+        "div.signaturecontainer",
+        "div.signature",
+        ".smallfont.attachments",
+        "div.attachments",
+        "div.lastedit",
+        "div.lastpost",
+    ]:
+        for tag in post_html_root.select(sel):
+            tag.decompose()
+
+
+def parse_thread_page(html: str) -> ThreadPage:
+    """Parse showthread.php HTML — extract post list + pagination state.
+
+    bimmerpost (vBulletin 3.8.11 multisite-style) structure observed:
+      <table id='postNNNN'> wraps each post (no underscore in id).
+        Header row:
+          <td class='thead'> contains the posted date text.
+        Body row, left cell (user info column):
+          <a class='bigusername'> author name </a>
+        Body row, right cell:
+          <div id='post_message_NNNN' class='thePostItself'> body </div>
+          <!-- sig --> <div> __________________ ... </div>
+          (signature lives OUTSIDE post_message_NNNN, so extracting that
+           div alone naturally excludes it.)
+        Quote wrapper inside body:  <div class='quotePost'> ... </div>
+
+    Pagination:  <div class='pagenav'> "Page N of M" </div>
+
+    For robustness we keep three id-pattern fallbacks (table/li/div),
+    matching either ``postNNN`` or ``post_NNN``, since other vB skins
+    differ.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    posts: list[Post] = []
+    seen_ids: set[int] = set()
+
+    # pattern A: <table id='postNNN'>
+    candidates = soup.find_all("table", id=_POST_TABLE_ID_RE)
+    if not candidates:
+        # pattern B: <li id='post_NNN'>
+        candidates = soup.find_all("li", id=_POST_LI_ID_RE)
+    if not candidates:
+        # pattern C: <div id='postNNN'>
+        candidates = soup.find_all("div", id=_POST_TABLE_ID_RE)
+
+    for el in candidates:
+        m = _POST_ID_DIGITS_RE.match(el.get("id", "") or "")
+        if not m:
+            continue
+        pid = int(m.group(1))
+        if pid in seen_ids:
+            continue
+        seen_ids.add(pid)
+
+        # author
+        author_el = (
+            el.find("a", class_="bigusername")
+            or el.find("div", class_="username_container")
+            or el.find("a", class_="username")
+        )
+        author = author_el.get_text(strip=True) if author_el else None
+
+        # posted_at: search for date text near top of the post block
+        # (td.thead carries the absolute "MM-DD-YYYY, HH:MM AM" stamp on
+        # the bimmerpost theme; .postdate / span.date for other themes).
+        posted_at: str | None = None
+        for date_holder in el.select("td.thead, div.postdate, span.date, .date"):
+            txt = date_holder.get_text(" ", strip=True)
+            iso = _normalize_vbulletin_date(txt)
+            if iso:
+                posted_at = iso
+                break
+
+        # message body
+        body_el = (
+            el.find("div", id=re.compile(rf"^post_message_{pid}$"))
+            or el.find("div", class_="postcontent")
+            or el.find("div", class_="content")
+        )
+        if body_el is None:
+            continue
+        _strip_post_chrome(body_el)
+        text = body_el.get_text("\n", strip=True)
+        # collapse 3+ newlines to one
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
+        if not text:
+            continue
+
+        posts.append(Post(author=author, posted_at=posted_at, text=text))
+
+    # pagination
+    pagenav = soup.find("div", class_="pagenav")
+    total_pages = 1
+    has_next = False
+    if pagenav:
+        page_text = pagenav.get_text(" ", strip=True)
+        m = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", page_text)
+        if m:
+            current = int(m.group(1))
+            total_pages = int(m.group(2))
+            has_next = current < total_pages
+
+    return ThreadPage(posts=posts, total_pages=total_pages, has_next=has_next)

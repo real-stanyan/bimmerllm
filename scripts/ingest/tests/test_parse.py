@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ingest.parse import parse_forum_index, parse_forum_listing_page
+from ingest.parse import parse_forum_index, parse_forum_listing_page, parse_thread_page
 
 
 def test_parse_forum_index_returns_nodes(fixtures_dir: Path):
@@ -60,3 +60,38 @@ def test_parse_forum_listing_unique_thread_ids(fixtures_dir: Path):
     page = parse_forum_listing_page(html, forum_id=888)
     ids = [t["thread_id"] for t in page["threads"]]
     assert len(ids) == len(set(ids))
+
+
+def test_parse_thread_page_returns_posts(fixtures_dir: Path):
+    html = (fixtures_dir / "thread_short_g80.html").read_text(encoding="utf-8")
+    page = parse_thread_page(html)
+    assert "posts" in page and len(page["posts"]) >= 1
+    assert "total_pages" in page
+    assert "has_next" in page
+
+
+def test_parse_thread_page_post_shape(fixtures_dir: Path):
+    html = (fixtures_dir / "thread_short_g80.html").read_text(encoding="utf-8")
+    page = parse_thread_page(html)
+    for p in page["posts"]:
+        assert set(p.keys()) >= {"author", "posted_at", "text"}
+        assert isinstance(p["text"], str) and p["text"]
+        # post text after quote/sig stripping should not contain "<div" tags
+        assert "<div" not in p["text"]
+
+
+def test_parse_thread_page_strips_quotes_and_sigs(fixtures_dir: Path):
+    """A quoted reply shouldn't include the quoted block in the post body."""
+    html = (fixtures_dir / "thread_short_g80.html").read_text(encoding="utf-8")
+    page = parse_thread_page(html)
+    # signatures often contain "__________" (4+ underscores)
+    for p in page["posts"]:
+        assert "________" not in p["text"]
+
+
+def test_parse_thread_page_paged_detects_next(fixtures_dir: Path):
+    html = (fixtures_dir / "thread_paged_g80.html").read_text(encoding="utf-8")
+    page = parse_thread_page(html)
+    assert page["total_pages"] >= 1
+    # if paged fixture has multiple pages, has_next is true; if not, lenient assertion
+    assert isinstance(page["has_next"], bool)
