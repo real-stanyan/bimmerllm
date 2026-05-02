@@ -38,10 +38,16 @@ export function migrateConversation(raw: unknown): Conversation | null {
   }
   if (typeof r.createdAt !== "string" || typeof r.updatedAt !== "string") return null;
 
+  const messages = (r.messages as unknown[]).filter((m): m is Message => {
+    if (!m || typeof m !== "object") return false;
+    const x = m as Record<string, unknown>;
+    return (x.role === "user" || x.role === "model") && typeof x.content === "string";
+  });
+
   return {
     id: r.id,
     title: r.title,
-    messages: r.messages as Message[],
+    messages,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     pinned: typeof r.pinned === "boolean" ? r.pinned : false,
@@ -53,8 +59,8 @@ export function migrateConversation(raw: unknown): Conversation | null {
 export function getBucket(updatedAt: string, now: Date = new Date()): Bucket {
   const d = new Date(updatedAt);
   const dayMs = 86400 * 1000;
-  // Use UTC midnight so tests with UTC timestamps work consistently everywhere
-  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
   const startOfYesterday = new Date(startOfToday.getTime() - dayMs);
   const startOfWeekAgo = new Date(startOfToday.getTime() - 7 * dayMs);
 
