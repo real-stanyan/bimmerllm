@@ -53,8 +53,8 @@ export function migrateConversation(raw: unknown): Conversation | null {
 export function getBucket(updatedAt: string, now: Date = new Date()): Bucket {
   const d = new Date(updatedAt);
   const dayMs = 86400 * 1000;
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
+  // Use UTC midnight so tests with UTC timestamps work consistently everywhere
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const startOfYesterday = new Date(startOfToday.getTime() - dayMs);
   const startOfWeekAgo = new Date(startOfToday.getTime() - 7 * dayMs);
 
