@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.67",
     "@google/generative-ai": "^0.24.1",
     "@huggingface/inference": "^4.13.3",
     "@langchain/community": "^1.0.3",
@@ -29,6 +30,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "langchain": "^1.0.0-alpha.9",
+    "langsmith": "^0.6.0",
     "lucide-react": "^0.554.0",
     "next": "16.0.3",
     "react": "19.2.0",
