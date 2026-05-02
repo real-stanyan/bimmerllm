@@ -126,11 +126,8 @@ export function ChatPage() {
     const sources = parseSourcesAnnotation(rawSources) ?? undefined;
 
     // allAiMessages is the full conversation state after the turn completes
-    // It already includes the assistant message, so use it directly
-    const allMessages = allAiMessages.length > 0
-      ? allAiMessages
-      : [...([] as AiUiMessage[]), message];
-    const stored = allMessages.map(fromAiMessage);
+    // It already includes the assistant message; use it directly.
+    const stored = allAiMessages.map(fromAiMessage);
 
     // Attach latency, token estimate, and sources to the last assistant message
     const lastIdx = stored.length - 1;
@@ -152,7 +149,6 @@ export function ChatPage() {
         updateActiveConversationRef.current(c => ({ ...c, title: firstUser.content.slice(0, 50) }));
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Create the Chat object once per conversation mount (key= remount handles conv switches).
