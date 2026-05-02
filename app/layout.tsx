@@ -13,7 +13,7 @@ const themeInitScript = `
     const a = localStorage.getItem("bimmerllm_accent");
     if (t) document.documentElement.dataset.theme = t;
     if (a) document.documentElement.dataset.accent = a;
-  } catch {}
+  } catch { /* intentionally empty — FOUC bootstrap must not throw or block render */ }
 `;
 
 export const metadata: Metadata = {

@@ -81,8 +81,6 @@
   --secondary-foreground: var(--text-1);
   --muted: var(--bg-3);
   --muted-foreground: var(--text-3);
-  --accent: var(--accent-soft);
-  --accent-foreground: var(--accent-hi);
   --destructive: var(--red);
   --border: var(--line-2);
   --input: var(--line-2);
