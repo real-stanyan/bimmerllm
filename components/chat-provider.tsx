@@ -7,111 +7,136 @@ import {
   useEffect,
   useState,
   ReactNode,
+  useCallback,
 } from "react";
+import {
+  type Conversation,
+  type Message,
+  migrateConversation,
+} from "@/lib/conversation";
 
 const STORAGE_KEY = "bimmerllm_conversations_v1";
-
-interface Message {
-  role: "user" | "model";
-  content: string;
-}
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: string;
-  updatedAt: string;
-}
 
 interface ChatContextValue {
   conversations: Conversation[];
   activeId: string | null;
   activeConversation: Conversation | null;
   setActiveId: (id: string) => void;
-  createConversation: () => void;
-  updateActiveConversation: (
-    updater: (prev: Conversation) => Conversation
-  ) => void;
+  createConversation: () => string;
+  updateActiveConversation: (updater: (prev: Conversation) => Conversation) => void;
+  togglePinned: (id: string) => void;
+  toggleFavorite: (id: string) => void;
+  setModel: (id: string, model: string) => void;
+  setMessages: (id: string, messages: Message[]) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
 
+function loadFromStorage(): Conversation[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(migrateConversation).filter((c): c is Conversation => c !== null);
+  } catch {
+    return [];
+  }
+}
+
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
-  // 初始化：从 localStorage 读
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed: Conversation[] = JSON.parse(raw);
-        if (parsed.length > 0) {
-          setConversations(parsed);
-          setActiveId(parsed[0].id);
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("Failed to load conversations", e);
+    const loaded = loadFromStorage();
+    if (loaded.length > 0) {
+      setConversations(loaded);
+      setActiveId(loaded[0].id);
+    } else {
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const initial: Conversation = {
+        id,
+        title: "New consultation",
+        messages: [],
+        createdAt: now,
+        updatedAt: now,
+        pinned: false,
+        favorite: false,
+        model: "Auto-detect",
+      };
+      setConversations([initial]);
+      setActiveId(id);
     }
-
-    // 没有数据时创建一个新会话
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const initial: Conversation = {
-      id,
-      title: "New chat",
-      messages: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    setConversations([initial]);
-    setActiveId(id);
+    setHydrated(true);
   }, []);
 
-  // 同步到 localStorage
   useEffect(() => {
-    if (conversations.length === 0) return;
+    if (!hydrated || conversations.length === 0) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-    } catch (e) {
-      console.error("Failed to save conversations", e);
-    }
-  }, [conversations]);
+    } catch {}
+  }, [conversations, hydrated]);
 
-  const activeConversation =
-    conversations.find((c) => c.id === activeId) ?? null;
+  const activeConversation = conversations.find(c => c.id === activeId) ?? null;
 
-  const createConversation = () => {
+  const createConversation = useCallback(() => {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const conv: Conversation = {
       id,
-      title: "New chat",
+      title: "New consultation",
       messages: [],
       createdAt: now,
       updatedAt: now,
+      pinned: false,
+      favorite: false,
+      model: "Auto-detect",
     };
-    setConversations((prev) => [conv, ...prev]);
+    setConversations(prev => [conv, ...prev]);
     setActiveId(id);
-  };
+    return id;
+  }, []);
 
-  const updateActiveConversation = (
-    updater: (prev: Conversation) => Conversation
-  ) => {
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id !== activeId) return c;
-        const updated = updater(c);
-        return {
-          ...updated,
-          updatedAt: new Date().toISOString(),
-        };
-      })
+  const updateActiveConversation = useCallback(
+    (updater: (prev: Conversation) => Conversation) => {
+      setConversations(prev =>
+        prev.map(c => {
+          if (c.id !== activeId) return c;
+          const updated = updater(c);
+          return { ...updated, updatedAt: new Date().toISOString() };
+        })
+      );
+    },
+    [activeId]
+  );
+
+  const togglePinned = useCallback((id: string) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === id ? { ...c, pinned: !c.pinned, updatedAt: new Date().toISOString() } : c))
     );
-  };
+  }, []);
+
+  const toggleFavorite = useCallback((id: string) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === id ? { ...c, favorite: !c.favorite, updatedAt: new Date().toISOString() } : c))
+    );
+  }, []);
+
+  const setModel = useCallback((id: string, model: string) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === id ? { ...c, model, updatedAt: new Date().toISOString() } : c))
+    );
+  }, []);
+
+  const setMessages = useCallback((id: string, messages: Message[]) => {
+    setConversations(prev =>
+      prev.map(c => (c.id === id ? { ...c, messages, updatedAt: new Date().toISOString() } : c))
+    );
+  }, []);
 
   return (
     <ChatContext.Provider
@@ -122,6 +147,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setActiveId,
         createConversation,
         updateActiveConversation,
+        togglePinned,
+        toggleFavorite,
+        setModel,
+        setMessages,
       }}
     >
       {children}
@@ -131,8 +160,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
 export function useChat() {
   const ctx = useContext(ChatContext);
-  if (!ctx) {
-    throw new Error("useChat must be used within ChatProvider");
-  }
+  if (!ctx) throw new Error("useChat must be used within ChatProvider");
   return ctx;
 }
