@@ -228,4 +228,10 @@ body::before {
    Disabled for now — the page renders without entrance animation, which is
    acceptable. Revisit if the underlying timeline issue gets fixed in Next 16+. */
 .animate-fadeUp,
-.animate-fadeIn { /* no-op */ }
+.animate-fadeIn {
+  /* Web Animations API stays in "pending" state in Next.js 16 + Turbopack dev
+     mode — the keyframe `from { opacity: 0 }` pins the element invisible.
+     Override with animation: none and force full opacity so content is visible. */
+  animation: none !important;
+  opacity: 1 !important;
+}
