@@ -154,6 +154,9 @@ const handler = traceable(
 【参考资料 (来源: bimmerpost 论坛)】:
 ${contextText}`;
 
+    // convertToModelMessages is async in ai@6
+    const modelMessages = await convertToModelMessages(messages);
+
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
         // Emit sources annotation BEFORE the text stream begins.
@@ -169,7 +172,7 @@ ${contextText}`;
         const result = streamText({
           model: aiSdkGoogle(GEMINI_MODEL_ID),
           system,
-          messages: convertToModelMessages(messages),
+          messages: modelMessages,
           temperature: 0.2,
           onError: (err) => console.error("[generate] streamText error:", err),
         });
