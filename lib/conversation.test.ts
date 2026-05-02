@@ -18,25 +18,29 @@ describe("migrateConversation", () => {
 
   it("fills pinned/favorite/model defaults on legacy entry", () => {
     const out = migrateConversation(baseLegacy);
-    expect(out.pinned).toBe(false);
-    expect(out.favorite).toBe(false);
-    expect(out.model).toBe("Auto-detect");
+    expect(out).not.toBeNull();
+    expect(out!.pinned).toBe(false);
+    expect(out!.favorite).toBe(false);
+    expect(out!.model).toBe("Auto-detect");
   });
 
   it("preserves existing pinned=true", () => {
     const out = migrateConversation({ ...baseLegacy, pinned: true });
-    expect(out.pinned).toBe(true);
+    expect(out).not.toBeNull();
+    expect(out!.pinned).toBe(true);
   });
 
   it("preserves existing favorite + model", () => {
     const out = migrateConversation({ ...baseLegacy, favorite: true, model: "335i • E92" });
-    expect(out.favorite).toBe(true);
-    expect(out.model).toBe("335i • E92");
+    expect(out).not.toBeNull();
+    expect(out!.favorite).toBe(true);
+    expect(out!.model).toBe("335i • E92");
   });
 
   it("preserves messages verbatim including role", () => {
     const out = migrateConversation(baseLegacy);
-    expect(out.messages).toEqual(baseLegacy.messages);
+    expect(out).not.toBeNull();
+    expect(out!.messages).toEqual(baseLegacy.messages);
   });
 
   it("returns null for non-object input", () => {
