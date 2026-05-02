@@ -26,7 +26,8 @@ export const maxDuration = 60;
 interface SearchHit {
   _id: string;
   _score: number;
-  fields?: { answers?: string };
+  // answers is stored as an array of strings (conversation turns) in Pinecone
+  fields?: { answers?: string | string[] };
 }
 interface SearchResponse {
   result?: { hits: SearchHit[] };
@@ -102,11 +103,16 @@ const retrieve = traceable(
       })) as unknown as SearchResponse;
 
       const hits = response.result?.hits ?? [];
-      return hits.map((h) => ({
-        id: h._id,
-        score: h._score,
-        preview: (h.fields?.answers ?? "").slice(0, 240),
-      }));
+      return hits.map((h) => {
+        const raw = h.fields?.answers ?? "";
+        // answers may be a string or an array of strings (conversation turns)
+        const text = Array.isArray(raw) ? raw.join("\n") : raw;
+        return {
+          id: h._id,
+          score: h._score,
+          preview: text.slice(0, 240),
+        };
+      });
     } catch (err) {
       console.error("[retrieve] Pinecone search failed:", err);
       return [];
