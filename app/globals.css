@@ -221,5 +221,11 @@ body::before {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.animate-fadeUp { animation: fadeUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-.animate-fadeIn { animation: fadeIn 0.25s ease both; }
+/* fadeUp / fadeIn animations were defined in the mockup but the Web Animations
+   API in Next.js 16 + Turbopack dev mode leaves these in "pending" state
+   (currentTime=0, startTime=null), so animation-fill-mode `both`/`forwards`
+   pin the element at the keyframe `from { opacity: 0 }` indefinitely.
+   Disabled for now — the page renders without entrance animation, which is
+   acceptable. Revisit if the underlying timeline issue gets fixed in Next 16+. */
+.animate-fadeUp,
+.animate-fadeIn { /* no-op */ }
