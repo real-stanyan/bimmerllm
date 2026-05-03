@@ -18,10 +18,11 @@ def test_parse_forum_index_node_shape(fixtures_dir: Path):
     html = (fixtures_dir / "forum_index_g80.html").read_text(encoding="utf-8")
     nodes = parse_forum_index(html, chassis="g80")
     for n in nodes:
-        assert set(n.keys()) == {"forum_id", "name", "parent_forum_id", "url"}
+        assert set(n.keys()) == {"forum_id", "name", "parent_forum_id", "parent_category", "url"}
         assert isinstance(n["forum_id"], int) and n["forum_id"] > 0
         assert isinstance(n["name"], str) and n["name"]
         assert n["parent_forum_id"] is None or isinstance(n["parent_forum_id"], int)
+        assert isinstance(n["parent_category"], str)
         assert n["url"].startswith("https://g80.bimmerpost.com/")
         assert f"f={n['forum_id']}" in n["url"]
 
@@ -31,6 +32,22 @@ def test_parse_forum_index_unique_forum_ids(fixtures_dir: Path):
     nodes = parse_forum_index(html, chassis="g80")
     ids = [n["forum_id"] for n in nodes]
     assert len(ids) == len(set(ids))
+
+
+def test_parse_forum_index_attaches_category(fixtures_dir: Path):
+    """Each forum should carry its enclosing table's first-link as parent_category.
+    G80 fixture has at least these category parents:
+      - 'G80 BMW M3 and M4 General Topics'
+      - 'Technical Sections'
+      - 'Classifieds'
+      - 'BIMMERPOST Universal Forums'
+    """
+    html = (fixtures_dir / "forum_index_g80.html").read_text(encoding="utf-8")
+    nodes = parse_forum_index(html, chassis="g80")
+    categories = {n["parent_category"] for n in nodes if n["parent_category"]}
+    assert "G80 BMW M3 and M4 General Topics" in categories
+    assert "Technical Sections" in categories
+    assert "BIMMERPOST Universal Forums" in categories
 
 
 def test_parse_forum_listing_page_returns_threads(fixtures_dir: Path):

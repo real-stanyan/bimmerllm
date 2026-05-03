@@ -16,7 +16,7 @@ def test_all_expected_chassis_present():
 @pytest.mark.parametrize("chassis", sorted(VALID_CHASSIS_KEYS))
 def test_chassis_entry_well_formed(chassis: str):
     cfg = CHASSIS_MAP[chassis]
-    assert set(cfg.keys()) == {"subdomain", "models", "engines", "series"}
+    assert set(cfg.keys()) == {"subdomain", "models", "engines", "series", "m_letter"}
     assert isinstance(cfg["subdomain"], str)
     assert cfg["subdomain"] == f"{chassis}.bimmerpost.com"
     assert isinstance(cfg["models"], list) and cfg["models"]
@@ -24,6 +24,8 @@ def test_chassis_entry_well_formed(chassis: str):
     assert isinstance(cfg["engines"], list) and cfg["engines"]
     assert all(re.fullmatch(r"[A-Z]\d{2,3}", e) for e in cfg["engines"])
     assert cfg["series"] in VALID_SERIES
+    assert isinstance(cfg["m_letter"], list) and cfg["m_letter"]
+    assert all(re.fullmatch(r"M\d", t) for t in cfg["m_letter"])
 
 
 def test_user_agent_is_real_chrome_ua():

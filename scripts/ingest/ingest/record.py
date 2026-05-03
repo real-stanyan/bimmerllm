@@ -67,8 +67,14 @@ def validate_record(rec: dict[str, Any]) -> None:
 
 def truncate_answers_to_budget(rec: dict[str, Any]) -> int:
     """Shrink rec['answers'] to fit PINECONE_METADATA_BUDGET_BYTES.
-    First drops trailing answers; if a single oversized OP remains, truncates its text.
-    Returns final byte size. Caller is responsible for marking truncated_at in sqlite."""
+    First drops trailing answers; if a single oversized OP remains, byte-slices its text.
+    Returns final byte size. Caller is responsible for marking truncated_at in sqlite.
+
+    Critical: slicing must be by encoded byte length (not char length) — Chinese,
+    Japanese, Korean characters are 3 bytes/char in UTF-8. Naive char-slicing can
+    leave a record up to 3× the budget, which trips Pinecone's 40KB hard limit
+    and causes a fatal 4xx for the whole batch.
+    """
     answers = rec["answers"]
     while len(answers) > 1:
         size = sum(len(s.encode("utf-8")) for s in answers)
@@ -76,8 +82,10 @@ def truncate_answers_to_budget(rec: dict[str, Any]) -> int:
             return size
         answers.pop()
     if answers and len(answers[0].encode("utf-8")) > PINECONE_METADATA_BUDGET_BYTES:
-        # single oversized OP — truncate its text. 80% of byte budget as char budget
-        # is a safe heuristic for mixed-script (ASCII + Chinese) text.
-        char_budget = int(PINECONE_METADATA_BUDGET_BYTES * 0.8)
-        answers[0] = answers[0][:char_budget] + "...[truncated]"
+        suffix = "...[truncated]"
+        suffix_bytes = len(suffix.encode("utf-8"))
+        budget = PINECONE_METADATA_BUDGET_BYTES - suffix_bytes
+        encoded = answers[0].encode("utf-8")[:budget]
+        # decode with errors='ignore' to drop a partial multi-byte char at the cut
+        answers[0] = encoded.decode("utf-8", errors="ignore") + suffix
     return sum(len(s.encode("utf-8")) for s in answers)

@@ -82,3 +82,34 @@ def test_validate_record_raises_oversize():
            "answers": ["a" * 40_000], "model": ["G80"], "label": ["S58"], "series": "3/4 Series"}
     with pytest.raises(RecordOversize):
         validate_record(rec)
+
+
+def test_truncate_answers_handles_multibyte_unicode():
+    """Critical: Chinese / Japanese / Korean text is 3 bytes/char in UTF-8.
+    Char-based slicing leaves a record 3× over budget. Must byte-slice."""
+    from ingest.record import truncate_answers_to_budget
+    from ingest.config import PINECONE_METADATA_BUDGET_BYTES
+
+    # 30000 Chinese chars = 90000 bytes — way over the 35K budget
+    rec = {"_id": str(uuid.uuid4()), "question": "x", "original_question": "x",
+           "answers": ["汉字" * 15_000], "model": ["G80"], "label": ["S58"], "series": "3/4 Series"}
+    final_size = truncate_answers_to_budget(rec)
+    # final size must be at or below budget — not 2-3x over
+    assert final_size <= PINECONE_METADATA_BUDGET_BYTES, \
+        f"truncate failed: {final_size}B > {PINECONE_METADATA_BUDGET_BYTES}B budget"
+
+    # validate_record should now pass on the truncated record
+    validate_record(rec)
+
+
+def test_truncate_answers_drops_trailing_then_keeps_one():
+    """Drop trailing answers first; only byte-slice if single OP still oversized."""
+    from ingest.record import truncate_answers_to_budget
+    from ingest.config import PINECONE_METADATA_BUDGET_BYTES
+
+    rec = {"_id": str(uuid.uuid4()), "question": "x", "original_question": "x",
+           "answers": ["a" * 20_000, "b" * 20_000], "model": ["G80"],
+           "label": ["S58"], "series": "3/4 Series"}
+    final_size = truncate_answers_to_budget(rec)
+    assert len(rec["answers"]) == 1
+    assert final_size == 20_000 <= PINECONE_METADATA_BUDGET_BYTES

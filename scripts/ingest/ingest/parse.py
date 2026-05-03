@@ -18,6 +18,7 @@ class ForumNode(TypedDict):
     forum_id: int
     name: str
     parent_forum_id: int | None
+    parent_category: str   # name of the table-first forum link that anchors this category section
     url: str
 
 
@@ -27,33 +28,57 @@ _FORUM_HREF_RE = re.compile(r"forumdisplay\.php\?(?:[^\"']*&)?f=(\d+)")
 def parse_forum_index(html: str, chassis: str) -> list[ForumNode]:
     """Walk a chassis subdomain root index.php, extract every sub-forum link.
 
-    Returns a flat list of forum nodes. Parent-child nesting is left as None
-    in V1; the listing/fetch stages don't need it. Only the forum_id and
-    URL are load-bearing for downstream stages.
+    Each <table class='tborder'> on the index represents a category section.
+    The first forum link in the table is the category parent (e.g. 'G80 BMW M3
+    and M4 General Topics' or 'BIMMERPOST Universal Forums'); subsequent links
+    are children. We attach parent_category to every node so the discover stage
+    can filter out cross-site shared sections (Off-Topic, Sim Racing, Watches,
+    Classic BMW pre-2005, etc.) that bleed into chassis subdomains.
     """
     soup = BeautifulSoup(html, "lxml")
     base_url = f"https://{chassis}.bimmerpost.com/forums/"
 
     seen: dict[int, ForumNode] = {}
-    for a in soup.find_all("a", href=True):
+
+    def _record(a, parent_category: str) -> None:
         href = a["href"]
         m = _FORUM_HREF_RE.search(href)
         if not m:
-            continue
+            return
         forum_id = int(m.group(1))
+        if forum_id in seen:
+            return  # keep first occurrence; later ones are breadcrumbs/duplicates
         name = a.get_text(strip=True)
         if not name:
-            continue
-        if forum_id in seen:
-            # keep the first occurrence; later ones are usually breadcrumbs
-            continue
+            return
         absolute = urljoin(base_url, href) if not href.startswith("http") else href
         seen[forum_id] = ForumNode(
             forum_id=forum_id,
             name=name,
             parent_forum_id=None,
+            parent_category=parent_category,
             url=absolute,
         )
+
+    for table in soup.find_all("table"):
+        classes = table.get("class") or []
+        if not any("tborder" in c for c in classes):
+            continue
+        forum_links = [a for a in table.find_all("a", href=True)
+                       if _FORUM_HREF_RE.search(a.get("href", ""))]
+        if not forum_links:
+            continue
+        category_name = forum_links[0].get_text(strip=True) or "(uncategorized)"
+        for a in forum_links:
+            _record(a, parent_category=category_name)
+
+    # Fallback: any forumdisplay link not caught by table iteration (e.g., breadcrumbs
+    # or non-tborder tables). Tag with empty parent_category so the discover filter
+    # applies the strict default-deny rule.
+    for a in soup.find_all("a", href=True):
+        if _FORUM_HREF_RE.search(a["href"]):
+            _record(a, parent_category="")
+
     return list(seen.values())
 
 
