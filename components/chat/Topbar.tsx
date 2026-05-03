@@ -1,6 +1,7 @@
 // components/chat/Topbar.tsx
 "use client";
 import { I } from "@/components/ui/icons";
+import { MobileSidebarTrigger } from "@/components/sidebar/MobileSidebar";
 import { ModelPicker } from "./ModelPicker";
 
 interface Props {
@@ -19,11 +20,12 @@ export function Topbar({
   onBookmark, bookmarked, onRegenerate, canRegenerate,
 }: Props) {
   return (
-    <header className="h-[52px] shrink-0 flex items-center justify-between px-6 border-b border-[var(--line-1)] bg-[var(--bg-1)]">
-      <div className="flex items-center gap-2 text-[12.5px]">
-        <span className="font-mono text-[10.5px] uppercase tracking-wider text-[var(--text-3)]">Consultation</span>
-        <I.ChevronRight size={11} className="text-[var(--text-3)]" />
-        <span className="text-[var(--text-1)] font-medium">{isEmpty ? "New session" : title}</span>
+    <header className="h-[52px] shrink-0 flex items-center justify-between px-4 md:px-6 border-b border-[var(--line-1)] bg-[var(--bg-1)]">
+      <div className="flex items-center gap-2 text-[12.5px] min-w-0">
+        <MobileSidebarTrigger className="-ml-1.5 mr-0.5" />
+        <span className="font-mono text-[10.5px] uppercase tracking-wider text-[var(--text-3)] hidden sm:inline">Consultation</span>
+        <I.ChevronRight size={11} className="text-[var(--text-3)] hidden sm:inline" />
+        <span className="text-[var(--text-1)] font-medium truncate">{isEmpty ? "New session" : title}</span>
       </div>
       <div className="flex items-center gap-2">
         <ModelPicker value={vehicleContext} onChange={setVehicleContext} />

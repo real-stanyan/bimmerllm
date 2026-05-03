@@ -8,18 +8,26 @@ import { SearchBox } from "./SearchBox";
 import { ThreadList } from "./ThreadList";
 import { UserFooter } from "./UserFooter";
 
-export function Sidebar() {
+export function SidebarBody() {
   const [query, setQuery] = useState("");
   return (
-    <aside
-      className="hidden md:flex flex-col w-[268px] shrink-0 h-full p-3 border-r border-[var(--line-1)] bg-[var(--bg-2)]"
-    >
+    <>
       <Brand />
       <NavItems />
       <NewConsultationButton />
       <SearchBox value={query} onChange={setQuery} />
       <ThreadList query={query} />
       <UserFooter />
+    </>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <aside
+      className="hidden md:flex flex-col w-[268px] shrink-0 h-full p-3 border-r border-[var(--line-1)] bg-[var(--bg-2)]"
+    >
+      <SidebarBody />
     </aside>
   );
 }

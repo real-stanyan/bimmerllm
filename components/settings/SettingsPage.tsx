@@ -2,6 +2,7 @@
 "use client";
 import { useState } from "react";
 import { I } from "@/components/ui/icons";
+import { MobileSidebarTrigger } from "@/components/sidebar/MobileSidebar";
 import { PreferencesSection } from "./PreferencesSection";
 import { AppearanceSection } from "./AppearanceSection";
 
@@ -16,15 +17,17 @@ export function SettingsPage() {
   const [section, setSection] = useState<SectionId>("preferences");
   return (
     <div className="flex-1 h-full overflow-y-auto">
-      <header className="px-10 pt-9 pb-6 border-b border-[var(--line-1)]">
-        <div className="font-mono text-[10.5px] text-[var(--text-3)] uppercase tracking-widest mb-2">Account</div>
+      <header className="px-5 md:px-10 pt-5 md:pt-9 pb-6 border-b border-[var(--line-1)]">
+        <div className="flex items-center gap-1.5 mb-2">
+          <MobileSidebarTrigger className="-ml-1.5" />
+          <div className="font-mono text-[10.5px] text-[var(--text-3)] uppercase tracking-widest">Account</div>
+        </div>
         <h1 className="text-[28px] font-medium tracking-tight m-0">Settings</h1>
       </header>
       <div
-        className="grid max-w-[1080px] mx-auto gap-10 px-10 pt-7 pb-20"
-        style={{ gridTemplateColumns: "200px 1fr" }}
+        className="grid max-w-[1080px] mx-auto gap-6 md:gap-10 px-5 md:px-10 pt-7 pb-20 grid-cols-1 md:[grid-template-columns:200px_1fr]"
       >
-        <nav className="flex flex-col gap-px sticky top-7 self-start h-fit">
+        <nav className="flex md:flex-col gap-px md:sticky md:top-7 self-start h-fit overflow-x-auto md:overflow-x-visible">
           {SECTIONS.map(s => {
             const Icon = s.icon;
             const active = section === s.id;

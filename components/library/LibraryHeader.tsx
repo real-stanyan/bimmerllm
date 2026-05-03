@@ -1,6 +1,7 @@
 // components/library/LibraryHeader.tsx
 "use client";
 import { I } from "@/components/ui/icons";
+import { MobileSidebarTrigger } from "@/components/sidebar/MobileSidebar";
 
 interface Props {
   total: number;
@@ -13,9 +14,12 @@ interface Props {
 
 export function LibraryHeader({ total, favorited, query, setQuery, view, setView }: Props) {
   return (
-    <header className="px-10 pt-9 pb-6 border-b border-[var(--line-1)] flex justify-between items-end gap-6 flex-wrap">
+    <header className="px-5 md:px-10 pt-5 md:pt-9 pb-6 border-b border-[var(--line-1)] flex justify-between items-end gap-6 flex-wrap">
       <div>
-        <div className="font-mono text-[10.5px] text-[var(--text-3)] uppercase tracking-widest mb-2">Library</div>
+        <div className="flex items-center gap-1.5 mb-2">
+          <MobileSidebarTrigger className="-ml-1.5" />
+          <div className="font-mono text-[10.5px] text-[var(--text-3)] uppercase tracking-widest">Library</div>
+        </div>
         <h1 className="text-[28px] font-medium tracking-tight m-0 text-[var(--text-1)]">Consultation history</h1>
         <p className="text-[13px] text-[var(--text-3)] mt-2">{total} sessions · {favorited} favorited</p>
       </div>
