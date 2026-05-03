@@ -35,9 +35,16 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-DEFAULT_QPS = 1.0
-DEFAULT_JITTER_SEC = 0.3
+DEFAULT_QPS = 0.5                  # 2s/req — well under any vBulletin flood threshold for 100k+ req crawls
+DEFAULT_JITTER_SEC = 2.0            # 0–2s uniform jitter on top, makes traffic look human
 DEFAULT_BATCH_SIZE = 50
+
+# Anti-throttling defaults
+HEARTBEAT_BREAK_EVERY_N = 200       # after every N successful requests, take a 60s breather
+HEARTBEAT_BREAK_SECONDS = 60
+COOLDOWN_AFTER_N_ERRORS = 5         # consecutive transient errors → cool-down sleep
+COOLDOWN_SECONDS = 300              # 5min on first cooldown
+LONG_COOLDOWN_SECONDS = 1800        # 30min after repeated cooldowns
 
 PINECONE_INDEX = "bmw-datas"
 PINECONE_NAMESPACE = "bimmerpost"
