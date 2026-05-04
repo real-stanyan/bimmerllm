@@ -45,6 +45,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="max pages per forum (list stage). useful for PoC.")
     p.add_argument("--max-threads", type=int, default=None,
                    help="max threads to fetch in this run (fetch stage)")
+    p.add_argument("--max-pages-per-thread", type=int, default=5,
+                   help="cap pages fetched per thread; mega-threads marked truncated_at (default 5)")
     p.add_argument("--qps", type=float, default=DEFAULT_QPS)
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p.add_argument("--dry-run", action="store_true",
@@ -108,7 +110,9 @@ def main(argv: list[str] | None = None) -> int:
                              mode=args.mode, max_pages=args.max_pages)
 
         if run_fetch:
-            fetch_threads.run(conn, fetcher=fetcher, max_threads=args.max_threads)
+            fetch_threads.run(conn, fetcher=fetcher,
+                              max_threads=args.max_threads,
+                              max_pages_per_thread=args.max_pages_per_thread)
 
         if run_upload:
             index = None if args.dry_run else _resolve_index_namespace()
