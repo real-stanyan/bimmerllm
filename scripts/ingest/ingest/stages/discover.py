@@ -92,15 +92,25 @@ def is_chassis_relevant(parent_category: str, name: str, cfg: dict) -> bool:
 
 
 def run(conn: sqlite3.Connection, chassis_keys: Iterable[str], fetcher: FetcherProto) -> None:
-    """For each chassis, fetch index.php and insert chassis-relevant sub-forums."""
+    """For each chassis, fetch index.php and insert chassis-relevant sub-forums.
+
+    A failure on one chassis (e.g. subdomain temporarily unreachable) logs +
+    skips that chassis instead of crashing the whole pipeline. The forums
+    table already-discovered for other chassis stays intact and re-runs of
+    discover are idempotent (insert_forum is upsert)."""
     for chassis in chassis_keys:
         if chassis not in CHASSIS_MAP:
             raise KeyError(f"unknown chassis '{chassis}' (not in CHASSIS_MAP)")
         cfg = CHASSIS_MAP[chassis]
         url = f"https://{cfg['subdomain']}/forums/index.php"
         logger.info("[discover] fetching %s", url)
-        html = fetcher.get(url)
-        nodes = parse_forum_index(html, chassis=chassis)
+
+        try:
+            html = fetcher.get(url)
+            nodes = parse_forum_index(html, chassis=chassis)
+        except Exception as e:
+            logger.exception("[discover] %s — fetch/parse failed: %s — skipping chassis", chassis, e)
+            continue
 
         kept = []
         skipped = []

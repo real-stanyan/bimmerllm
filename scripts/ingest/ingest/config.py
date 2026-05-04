@@ -42,7 +42,10 @@ DEFAULT_BATCH_SIZE = 50
 # Anti-throttling defaults
 HEARTBEAT_BREAK_EVERY_N = 200       # after every N successful requests, take a 60s breather
 HEARTBEAT_BREAK_SECONDS = 60
-COOLDOWN_AFTER_N_ERRORS = 5         # consecutive transient errors → cool-down sleep
+COOLDOWN_AFTER_N_ERRORS = 3         # consecutive transient errors → cool-down sleep
+                                     # MUST be ≤ get()'s max_attempts (3) so a single
+                                     # get() call can self-heal via cool-down rather
+                                     # than raising before the threshold is reached.
 COOLDOWN_SECONDS = 300              # 5min on first cooldown
 LONG_COOLDOWN_SECONDS = 1800        # 30min after repeated cooldowns
 

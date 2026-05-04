@@ -49,7 +49,9 @@ def test_get_retries_on_5xx(mocker):
 def test_get_raises_after_3_retries_5xx(mocker):
     _patch_client(mocker, get_return=make_response(503))
     mocker.patch("ingest.http.time.sleep")
-    f = Fetcher(qps=100.0, jitter_sec=0.0)
+    # Disable cool-down so we exercise the bare-3-attempt path; otherwise
+    # cool-down kicks in on the 3rd 503 and would loop until cool-down limit.
+    f = Fetcher(qps=100.0, jitter_sec=0.0, cooldown_after_n_errors=99)
     with pytest.raises(RuntimeError, match="gave up"):
         f.get("https://x")
     f.close()
