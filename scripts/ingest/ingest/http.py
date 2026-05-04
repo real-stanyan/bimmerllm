@@ -152,7 +152,9 @@ class Fetcher:
         self._heartbeat_break()
 
         last_exc: Optional[Exception] = None
-        for attempt in range(3):
+        attempt = 0
+        max_attempts = 3
+        while attempt < max_attempts:
             self._rate_limit()
 
             headers = {}
@@ -165,12 +167,17 @@ class Fetcher:
             except (httpx.RequestError, httpx.RemoteProtocolError) as e:
                 last_exc = e
                 self._consecutive_transient += 1
+                if self._consecutive_transient >= self.cooldown_after_n_errors:
+                    # major recovery — sleep, rebuild client, reset attempt counter,
+                    # and try again. Cool-down has already cleared consecutive_transient.
+                    self._take_cooldown()
+                    attempt = 0
+                    continue
                 if self._consecutive_transient >= 2:
                     self._rebuild_client_if_stuck()
-                if self._consecutive_transient >= self.cooldown_after_n_errors:
-                    self._take_cooldown()
-                if attempt < 2:
-                    time.sleep(2 ** (attempt + 1))
+                attempt += 1
+                if attempt < max_attempts:
+                    time.sleep(2 ** attempt)
                     continue
                 raise
 
@@ -186,18 +193,21 @@ class Fetcher:
                 self._consecutive_transient += 1
                 if self._consecutive_429 >= 5:
                     raise RuntimeError(f"5 consecutive 429s — aborting (last url: {url})")
-                # short backoff for first 1-2, escalating cooldown after that
                 if self._consecutive_429 <= 2:
                     time.sleep(60)
                 else:
                     self._take_cooldown()
+                    attempt = 0  # cool-down reset; try again
                 continue
             if 500 <= status < 600:
                 self._consecutive_transient += 1
                 if self._consecutive_transient >= self.cooldown_after_n_errors:
                     self._take_cooldown()
-                if attempt < 2:
-                    time.sleep(2 ** (attempt + 1))
+                    attempt = 0
+                    continue
+                attempt += 1
+                if attempt < max_attempts:
+                    time.sleep(2 ** attempt)
                     continue
                 last_exc = RuntimeError(f"HTTP {status} for {url}")
                 continue

@@ -69,8 +69,16 @@ def run(
         while True:
             url = _build_listing_url(forum_url, page)
             logger.info("[list] %s/f=%d page=%d fetching %s", chassis, forum_id, page, url)
-            html = fetcher.get(url)
-            page_data = parse_forum_listing_page(html, forum_id=forum_id)
+            try:
+                html = fetcher.get(url)
+                page_data = parse_forum_listing_page(html, forum_id=forum_id)
+            except Exception as page_err:
+                # transient fetch / parse failure on a single page — log + advance to
+                # next forum so the run doesn't die. last_listed_page already
+                # checkpoints prior progress; this forum will be retried next run.
+                logger.exception("[list] %s/f=%d page=%d failed: %s — skipping forum",
+                                 chassis, forum_id, page, page_err)
+                break
             logger.info("[list] %s/f=%d page=%d → %d threads", chassis, forum_id, page, len(page_data["threads"]))
 
             chassis_base = f"https://{CHASSIS_MAP[chassis]['subdomain']}/forums/"
