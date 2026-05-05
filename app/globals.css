@@ -3,6 +3,37 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Surface our design tokens to Tailwind v4 utilities so e.g. `bg-bg-2`,
+   `text-text-1`, `border-line-2`, `bg-accent` work alongside the existing
+   `bg-[var(--bg-2)]` arbitrary-value syntax. */
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-bg-4: var(--bg-4);
+  --color-bg-elev: var(--bg-elev);
+
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
+
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-text-4: var(--text-4);
+
+  --color-accent: var(--accent);
+  --color-accent-hi: var(--accent-hi);
+  --color-accent-lo: var(--accent-lo);
+  --color-accent-glow: var(--accent-glow);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-status-green: var(--green);
+  --color-status-amber: var(--amber);
+  --color-status-red: var(--red);
+}
+
 /* ============================================
    bimmerllm — design tokens
    ============================================ */
@@ -133,8 +164,8 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(1200px 600px at 75% -10%, oklch(0.45 0.14 245 / 0.15), transparent 60%),
-    radial-gradient(900px 500px at 10% 110%, oklch(0.40 0.10 250 / 0.10), transparent 60%);
+    radial-gradient(1200px 600px at 75% -10%, var(--accent-glow), transparent 60%),
+    radial-gradient(900px 500px at 10% 110%, var(--accent-soft), transparent 60%);
   pointer-events: none;
   z-index: 0;
 }
