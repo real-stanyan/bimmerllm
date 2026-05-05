@@ -1,0 +1,100 @@
+{
+  "_format": {
+    "version": 1,
+    "fields": {
+      "query": "the user-facing question; CN or EN, mirror real chat usage",
+      "expected_thread_ids": "list of bimmerpost thread_id ints — sources are correct if any of these appear in topK",
+      "category": "diagnostic | procedural | part-spec | tuning | general",
+      "language": "cn | en | mixed",
+      "vehicle_context": "optional chassis hint passed alongside the query (e.g. 'F80')",
+      "notes": "optional free-form description of why these threads are the canonical answer"
+    },
+    "instructions": "Author 20 more entries to reach the 30-question target. Pick threads from the populated bimmerpost sqlite (data/ingest.db) so the eval set tracks real retrievable content. Aim for: 60% diagnostic, 25% procedural, 10% part-spec, 5% tuning. Mix 50% EN / 30% CN / 20% mixed. Cover all 7 chassis."
+  },
+  "questions": [
+    {
+      "id": "ev-001",
+      "query": "N54 HPFP cold start hesitation, no CEL, persists ~2s",
+      "expected_thread_ids": [],
+      "category": "diagnostic",
+      "language": "en",
+      "vehicle_context": "F80",
+      "notes": "Classic high-pressure fuel pump signature. Replace with placeholder thread IDs once you've identified the canonical threads in the corpus."
+    },
+    {
+      "id": "ev-002",
+      "query": "S55发动机黄油底盘换油塞规格是多少",
+      "expected_thread_ids": [],
+      "category": "part-spec",
+      "language": "cn",
+      "vehicle_context": "F80",
+      "notes": "Drain plug + crush washer torque/spec for the S55."
+    },
+    {
+      "id": "ev-003",
+      "query": "G80 brake pad replacement step by step",
+      "expected_thread_ids": [],
+      "category": "procedural",
+      "language": "en",
+      "vehicle_context": "G80"
+    },
+    {
+      "id": "ev-004",
+      "query": "MHD vs JB4 stage 1 怎么选 G87 M2",
+      "expected_thread_ids": [],
+      "category": "tuning",
+      "language": "mixed",
+      "vehicle_context": "G87"
+    },
+    {
+      "id": "ev-005",
+      "query": "F80 M3 charge pipe failure symptoms",
+      "expected_thread_ids": [],
+      "category": "diagnostic",
+      "language": "en",
+      "vehicle_context": "F80"
+    },
+    {
+      "id": "ev-006",
+      "query": "P0171 故障码 N55 怎么排查",
+      "expected_thread_ids": [],
+      "category": "diagnostic",
+      "language": "cn",
+      "vehicle_context": "F87",
+      "notes": "Tests sparse retrieval — error code 'P0171' is exact-match heavy."
+    },
+    {
+      "id": "ev-007",
+      "query": "F90 M5 transfer case fluid change interval",
+      "expected_thread_ids": [],
+      "category": "procedural",
+      "language": "en",
+      "vehicle_context": "F90"
+    },
+    {
+      "id": "ev-008",
+      "query": "G90 M5 hybrid battery cooling concerns",
+      "expected_thread_ids": [],
+      "category": "diagnostic",
+      "language": "en",
+      "vehicle_context": "G90"
+    },
+    {
+      "id": "ev-009",
+      "query": "S58 vanos solenoid 11537647476 part number compatibility",
+      "expected_thread_ids": [],
+      "category": "part-spec",
+      "language": "en",
+      "vehicle_context": "G80",
+      "notes": "Tests sparse retrieval on the part number."
+    },
+    {
+      "id": "ev-010",
+      "query": "F92 M8 carbon ceramic brake rotor groove repair",
+      "expected_thread_ids": [],
+      "category": "procedural",
+      "language": "en",
+      "vehicle_context": "F92"
+    }
+  ]
+}
