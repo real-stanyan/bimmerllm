@@ -14,11 +14,14 @@ from ..db import (
     mark_truncated,
     mark_uploaded,
 )
+from ..chunk import chunk_post
 from ..record import (
     RecordOversize,
     build_record,
+    build_record_v2,
     truncate_answers_to_budget,
     validate_record,
+    validate_record_v2,
 )
 
 
@@ -51,6 +54,39 @@ def _build_pending_record(conn: sqlite3.Connection, thread_id: int) -> tuple[dic
     return rec, truncated
 
 
+def _build_pending_records_v2(conn: sqlite3.Connection, thread_id: int) -> list[dict]:
+    """v2 schema: yield one record per chunk per post. Empty/whitespace posts
+    contribute zero records. Returns [] for fully empty threads (caller should
+    still mark them uploaded so the queue progresses)."""
+    thread = conn.execute("SELECT * FROM threads WHERE thread_id = ?", (thread_id,)).fetchone()
+    if thread is None:
+        raise ValueError(f"thread {thread_id} disappeared from sqlite")
+    posts = conn.execute(
+        "SELECT post_idx, author, posted_at, text FROM posts WHERE thread_id = ? ORDER BY post_idx",
+        (thread_id,),
+    ).fetchall()
+    chassis_cfg = CHASSIS_MAP[thread["chassis"]]
+
+    ensure_uuid(conn, thread_id)
+    thread_dict = dict(conn.execute("SELECT * FROM threads WHERE thread_id = ?", (thread_id,)).fetchone())
+
+    records: list[dict] = []
+    for post in posts:
+        post_dict = dict(post)
+        chunks = chunk_post(post_dict.get("text") or "")
+        for chunk_idx, chunk_text in enumerate(chunks):
+            rec = build_record_v2(thread_dict, post_dict, chunk_idx, chunk_text, chassis_cfg)
+            try:
+                validate_record_v2(rec)
+            except RecordOversize:
+                # A single chunk exceeded the byte budget — extremely unusual
+                # at 600-token caps but we still want to fail loud rather than
+                # silently truncate and lie about coverage.
+                raise
+            records.append(rec)
+    return records
+
+
 def run(
     conn: sqlite3.Connection,
     index,
@@ -58,11 +94,19 @@ def run(
     namespace: str,
     batch_size: int = 50,
     dry_run: bool = False,
+    schema_version: int = 1,
 ) -> None:
     """Pull pending threads, build records, upsert to Pinecone in batches.
 
+    schema_version=1 (default): one record per thread, v1 schema.
+    schema_version=2: one record per chunk per post, v2 schema. A thread can
+    fan out into many records; we still mark the *thread* uploaded as a unit.
+
     On batch failure: 30s sleep + retry the same batch (idempotent via UUID).
     Pinecone 4xx is treated as fatal and re-raised."""
+    if schema_version not in (1, 2):
+        raise ValueError(f"unknown schema_version: {schema_version}")
+
     while True:
         pending = list_threads_to_upload(conn, batch_size=batch_size)
         if not pending:
@@ -71,12 +115,18 @@ def run(
 
         records: list[dict] = []
         truncated_ids: list[int] = []
+        completed_thread_ids: list[int] = []
         for tid in pending:
             try:
-                rec, was_truncated = _build_pending_record(conn, tid)
-                records.append(rec)
-                if was_truncated:
-                    truncated_ids.append(tid)
+                if schema_version == 1:
+                    rec, was_truncated = _build_pending_record(conn, tid)
+                    records.append(rec)
+                    if was_truncated:
+                        truncated_ids.append(tid)
+                else:
+                    chunk_records = _build_pending_records_v2(conn, tid)
+                    records.extend(chunk_records)
+                completed_thread_ids.append(tid)
             except Exception as e:
                 logger.exception("[upload] thread %d build failed: %s — skipping", tid, e)
 
@@ -110,5 +160,12 @@ def run(
 
         for tid in truncated_ids:
             mark_truncated(conn, tid)
-        mark_uploaded(conn, pending)
-        logger.info("[upload] %d records committed (truncated: %d)", len(pending), len(truncated_ids))
+        # Mark only the threads that actually contributed at least one record
+        # (or v1: all pending). v2 with all-blank-post threads still gets
+        # marked here because the build_records call succeeded with [] for
+        # them, and we don't want them to spin in the queue.
+        mark_uploaded(conn, completed_thread_ids)
+        logger.info(
+            "[upload] %d records committed across %d threads (truncated: %d, schema=v%d)",
+            len(records), len(completed_thread_ids), len(truncated_ids), schema_version,
+        )

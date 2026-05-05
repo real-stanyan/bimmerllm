@@ -56,6 +56,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--stealth", action="store_true",
                    help="enable Scrapling StealthyFetcher fallback for 403 BotChallenge "
                         "(requires `pip install -e \".[stealth]\"` and Playwright Chromium)")
+    p.add_argument("--schema-version", type=int, default=1, choices=[1, 2],
+                   help="upload record schema (1=thread-level legacy, 2=post-chunk Phase 2)")
+    p.add_argument("--pinecone-index", default=None,
+                   help="override Pinecone index name (default from config: 'bmw-datas'; "
+                        "v2 ingest typically targets 'bmw-datas-v2')")
+    p.add_argument("--pinecone-namespace", default=None,
+                   help="override Pinecone namespace (default from config: 'bimmerpost')")
     return p.parse_args(argv)
 
 
@@ -69,13 +76,13 @@ def _resolve_chassis(arg: str) -> list[str]:
     return keys
 
 
-def _resolve_index_namespace():
+def _resolve_index_namespace(index_name: str | None = None):
     api_key = os.environ.get("PINECONE_API_KEY")
     if not api_key:
         raise SystemExit("PINECONE_API_KEY env var not set (sourcing .env.local helps)")
     from pinecone import Pinecone
     pc = Pinecone(api_key=api_key)
-    return pc.Index(PINECONE_INDEX)
+    return pc.Index(index_name or PINECONE_INDEX)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -117,14 +124,16 @@ def main(argv: list[str] | None = None) -> int:
                               max_pages_per_thread=args.max_pages_per_thread)
 
         if run_upload:
-            index = None if args.dry_run else _resolve_index_namespace()
+            target_namespace = args.pinecone_namespace or PINECONE_NAMESPACE
             if args.dry_run:
-                # build a dummy index that captures calls — for dry-run we still need an object
                 class _DryIndex:
                     def upsert_records(self, namespace, records): pass
                 index = _DryIndex()
-            upload.run(conn, index=index, namespace=PINECONE_NAMESPACE,
-                       batch_size=args.batch_size, dry_run=args.dry_run)
+            else:
+                index = _resolve_index_namespace(args.pinecone_index)
+            upload.run(conn, index=index, namespace=target_namespace,
+                       batch_size=args.batch_size, dry_run=args.dry_run,
+                       schema_version=args.schema_version)
     finally:
         fetcher.close()
         conn.close()

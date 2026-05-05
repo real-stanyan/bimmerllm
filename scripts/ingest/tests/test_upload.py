@@ -80,3 +80,68 @@ def test_upload_dry_run_does_not_call_pinecone(in_memory_db, capsys):
     fake_index.upsert_records.assert_not_called()
     row = in_memory_db.execute("SELECT uploaded_at FROM threads WHERE thread_id=4").fetchone()
     assert row["uploaded_at"] is None  # dry-run does not mark as uploaded
+
+
+# ============================================================
+# v2 upload path — Phase 2
+# ============================================================
+
+
+def test_upload_v2_emits_chunk_records(in_memory_db):
+    _seed_fetched_thread(in_memory_db, thread_id=10, posts=[
+        {"post_idx": 0, "author": "u", "posted_at": None,
+         "text": "OP body about HPFP failure on N54."},
+        {"post_idx": 1, "author": "u", "posted_at": None,
+         "text": "Reply body about HPFP fix at 75k miles."},
+    ])
+
+    fake_index = MagicMock()
+    upload.run(
+        in_memory_db, index=fake_index, namespace="bimmerpost-v2",
+        batch_size=10, schema_version=2,
+    )
+    args, kwargs = fake_index.upsert_records.call_args
+    records = kwargs.get("records") or args[1]
+    # Two short posts → one chunk each → 2 records.
+    assert len(records) == 2
+    rec_ids = [r["_id"] for r in records]
+    assert all(":0:0" in rid or ":1:0" in rid for rid in rec_ids)
+    # v2 has `text`, no `question`/`answers`.
+    for r in records:
+        assert "text" in r
+        assert "question" not in r
+        assert "answers" not in r
+        assert r["thread_url"] == "https://x"
+        assert r["thread_title"] == "My test thread"
+        assert r["chassis"] == "g80"
+
+
+def test_upload_v2_marks_uploaded_after_full_thread(in_memory_db):
+    _seed_fetched_thread(in_memory_db, thread_id=11)
+    fake_index = MagicMock()
+    upload.run(
+        in_memory_db, index=fake_index, namespace="bimmerpost-v2",
+        batch_size=10, schema_version=2,
+    )
+    row = in_memory_db.execute(
+        "SELECT uploaded_at, uuid FROM threads WHERE thread_id=11"
+    ).fetchone()
+    assert row["uploaded_at"] is not None
+    # uuid is still assigned (used in v2 _id composite)
+    assert row["uuid"] is not None
+
+
+def test_upload_v2_skips_blank_posts(in_memory_db):
+    _seed_fetched_thread(in_memory_db, thread_id=12, posts=[
+        {"post_idx": 0, "author": "u", "posted_at": None, "text": "valid OP body"},
+        {"post_idx": 1, "author": "u", "posted_at": None, "text": "   "},  # whitespace only
+        {"post_idx": 2, "author": "u", "posted_at": None, "text": "valid reply"},
+    ])
+    fake_index = MagicMock()
+    upload.run(
+        in_memory_db, index=fake_index, namespace="bimmerpost-v2",
+        batch_size=10, schema_version=2,
+    )
+    args, kwargs = fake_index.upsert_records.call_args
+    records = kwargs.get("records") or args[1]
+    assert len(records) == 2  # blank post produced 0 chunks
