@@ -67,7 +67,7 @@ LangSmith trace 要全工作还要：
 - Index: `bmw-datas`
 - Namespace: `bimmerpost`
 - 用 managed embedding（`searchRecords` 不需要本地 embed），返回 `fields.answers` 文本
-- **Ingest pipeline 不在这个 repo**——数据预先灌好的，灌库脚本/notebook 在别处
+- **Ingest pipeline 在 `scripts/ingest/`**（Python 4-stage：discover → list → fetch → upload + sqlite 状态机），spec/plan in `docs/superpowers/`。`pip install -e ".[dev]"` 跑测试，`pip install -e ".[stealth]" && scrapling install` 解锁 `--stealth` flag（Scrapling StealthyFetcher 403 fallback for CF challenge）
 
 ## 已知遗留 / 不一致（首批清理目标）
 

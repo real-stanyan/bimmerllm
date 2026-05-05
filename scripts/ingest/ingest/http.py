@@ -31,7 +31,42 @@ logger = logging.getLogger(__name__)
 
 
 class BotChallenge(Exception):
-    """Raised on HTTP 403 — caller should abort and (future) escalate to playwright."""
+    """Raised on HTTP 403. If a Fetcher has stealth_fallback configured, this is
+    caught internally and the URL is re-fetched via the fallback (Scrapling
+    StealthyFetcher) before propagating to the caller."""
+
+
+class StealthFetcher:
+    """Lazy-loaded Scrapling StealthyFetcher wrapper, used as 403 fallback.
+
+    Scrapling pulls Playwright Chromium (~300MB) and is slow to spin up, so we
+    do not import or initialise anything until the first 403 actually fires.
+    Tests stub `_load_impl` to keep unit tests independent of the optional dep.
+    """
+
+    def __init__(self, *, headless: bool = True, network_idle: bool = True):
+        self.headless = headless
+        self.network_idle = network_idle
+        self._impl = None
+
+    def _load_impl(self):
+        from scrapling.fetchers import StealthyFetcher
+        return StealthyFetcher
+
+    def get(self, url: str) -> str:
+        if self._impl is None:
+            self._impl = self._load_impl()
+        page = self._impl.fetch(
+            url,
+            headless=self.headless,
+            network_idle=self.network_idle,
+        )
+        if page.status != 200:
+            raise RuntimeError(
+                f"stealth fallback got HTTP {page.status} for {url}"
+            )
+        return page.body.decode(getattr(page, "encoding", None) or "utf-8",
+                                errors="replace")
 
 
 def _build_client() -> httpx.Client:
@@ -76,6 +111,7 @@ class Fetcher:
         cooldown_after_n_errors: int = COOLDOWN_AFTER_N_ERRORS,
         cooldown_seconds: int = COOLDOWN_SECONDS,
         long_cooldown_seconds: int = LONG_COOLDOWN_SECONDS,
+        stealth_fallback: Optional["StealthFetcher"] = None,
     ):
         self.client = _build_client()
         self.qps = qps
@@ -85,6 +121,7 @@ class Fetcher:
         self.cooldown_after_n_errors = cooldown_after_n_errors
         self.cooldown_seconds = cooldown_seconds
         self.long_cooldown_seconds = long_cooldown_seconds
+        self.stealth_fallback = stealth_fallback
 
         self._last_request_at: Optional[float] = None
         self._consecutive_429 = 0
@@ -148,6 +185,21 @@ class Fetcher:
         logger.info("[fetcher] client rebuilt after consecutive timeouts")
 
     def get(self, url: str) -> str:
+        try:
+            return self._http_get(url)
+        except BotChallenge:
+            if self.stealth_fallback is None:
+                raise
+            logger.warning("[fetcher] 403 BotChallenge for %s — escalating to stealth fallback", url)
+            text = self.stealth_fallback.get(url)
+            # treat as success: clear transient counters and advance bookkeeping
+            self._consecutive_429 = 0
+            self._consecutive_transient = 0
+            self._success_count += 1
+            self._last_url = url
+            return text
+
+    def _http_get(self, url: str) -> str:
         # heartbeat must run before rate-limit so its sleep doesn't get jittered
         self._heartbeat_break()
 

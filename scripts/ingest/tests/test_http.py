@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from ingest.http import BotChallenge, Fetcher
+from ingest.http import BotChallenge, Fetcher, StealthFetcher
 
 
 def make_response(status: int, body: str = "<html></html>") -> httpx.Response:
@@ -75,6 +75,74 @@ def test_get_raises_BotChallenge_on_403(mocker):
     with pytest.raises(BotChallenge):
         f.get("https://x")
     f.close()
+
+
+def test_get_calls_stealth_fallback_on_403(mocker):
+    _patch_client(mocker, get_return=make_response(403))
+    fallback = MagicMock()
+    fallback.get.return_value = "<stealth html/>"
+
+    f = Fetcher(qps=100.0, jitter_sec=0.0, stealth_fallback=fallback)
+    assert f.get("https://x") == "<stealth html/>"
+    fallback.get.assert_called_once_with("https://x")
+    f.close()
+
+
+def test_fallback_only_fires_on_403_not_5xx(mocker):
+    _patch_client(mocker, get_return=make_response(503))
+    fallback = MagicMock()
+    fallback.get.return_value = "<stealth/>"
+    mocker.patch("ingest.http.time.sleep")
+
+    f = Fetcher(qps=100.0, jitter_sec=0.0, stealth_fallback=fallback,
+                cooldown_after_n_errors=99)
+    with pytest.raises(RuntimeError, match="gave up"):
+        f.get("https://x")
+    fallback.get.assert_not_called()
+    f.close()
+
+
+def test_fallback_failure_propagates(mocker):
+    _patch_client(mocker, get_return=make_response(403))
+    fallback = MagicMock()
+    fallback.get.side_effect = RuntimeError("playwright blew up")
+
+    f = Fetcher(qps=100.0, jitter_sec=0.0, stealth_fallback=fallback)
+    with pytest.raises(RuntimeError, match="playwright"):
+        f.get("https://x")
+    f.close()
+
+
+def test_stealth_fetcher_lazy_imports_scrapling(mocker):
+    sf = StealthFetcher()
+    assert sf._impl is None
+
+    fake_resp = MagicMock(status=200)
+    fake_resp.body = b"<stealth body/>"
+    fake_resp.encoding = "utf-8"
+
+    fake_static = MagicMock()
+    fake_static.fetch.return_value = fake_resp
+    mocker.patch.object(StealthFetcher, "_load_impl", return_value=fake_static)
+
+    text = sf.get("https://x")
+    assert text == "<stealth body/>"
+    fake_static.fetch.assert_called_once()
+    args, kwargs = fake_static.fetch.call_args
+    assert args[0] == "https://x"
+    assert kwargs.get("headless") is True
+
+
+def test_stealth_fetcher_raises_on_non_200(mocker):
+    sf = StealthFetcher()
+    fake_resp = MagicMock(status=403, body=b"")
+    fake_resp.encoding = "utf-8"
+    fake_static = MagicMock()
+    fake_static.fetch.return_value = fake_resp
+    mocker.patch.object(StealthFetcher, "_load_impl", return_value=fake_static)
+
+    with pytest.raises(RuntimeError, match="403"):
+        sf.get("https://x")
 
 
 def test_get_retries_on_request_error(mocker):

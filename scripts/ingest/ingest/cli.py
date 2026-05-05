@@ -15,7 +15,7 @@ from .config import (
     PINECONE_NAMESPACE,
 )
 from .db import apply_schema, open_db
-from .http import Fetcher
+from .http import Fetcher, StealthFetcher
 from .stages import discover, fetch_threads, list_threads, upload
 
 
@@ -53,8 +53,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="upload stage prints record JSON instead of calling Pinecone")
     p.add_argument("--db", default="data/ingest.db")
     p.add_argument("--log", default="data/ingest.log")
-    p.add_argument("--browser", action="store_true",
-                   help="reserved for playwright fallback (NotImplementedError in V1)")
+    p.add_argument("--stealth", action="store_true",
+                   help="enable Scrapling StealthyFetcher fallback for 403 BotChallenge "
+                        "(requires `pip install -e \".[stealth]\"` and Playwright Chromium)")
     return p.parse_args(argv)
 
 
@@ -79,8 +80,6 @@ def _resolve_index_namespace():
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if args.browser:
-        raise NotImplementedError("--browser (playwright fallback) not implemented in V1")
 
     log_path = Path(args.log)
     _setup_logging(log_path)
@@ -95,7 +94,10 @@ def main(argv: list[str] | None = None) -> int:
     conn = open_db(db_path)
     apply_schema(conn)
 
-    fetcher = Fetcher(qps=args.qps)
+    stealth = StealthFetcher() if args.stealth else None
+    if stealth:
+        logger.info("stealth fallback enabled (Scrapling StealthyFetcher, lazy-loaded on first 403)")
+    fetcher = Fetcher(qps=args.qps, stealth_fallback=stealth)
     try:
         run_discover = args.stage in {"discover", "all"}
         run_list     = args.stage in {"list", "all"}
