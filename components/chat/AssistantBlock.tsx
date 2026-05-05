@@ -1,8 +1,10 @@
 // components/chat/AssistantBlock.tsx
 "use client";
+import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { SourceCitation } from "@/lib/conversation";
+import { parseCitationHref, processInlineCitations } from "@/lib/citations";
 import { SourcesPanel } from "./SourcesPanel";
 import { ActionsBar } from "./ActionsBar";
 import { ThinkingDots } from "./ThinkingDots";
@@ -27,6 +29,32 @@ export function AssistantBlock({
   onRegenerate, onThumbsUp, onThumbsDown,
 }: Props) {
   const sourceCount = sources?.length ?? 0;
+  const hasSources = !streaming && content && showSources && sourceCount > 0;
+
+  // Inline citations are rendered as #cite-N links; the components.a override
+  // intercepts them and scrolls the matching SourcesPanel entry into view.
+  const [sourcesOpen, setSourcesOpen] = useState(true);
+  const [highlightedIdx, setHighlightedIdx] = useState<number | null>(null);
+  const sourceRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const onCitationClick = (n: number) => {
+    if (!sources || n < 1 || n > sources.length) return;
+    setSourcesOpen(true);
+    // Defer to the next frame so the panel has expanded before we scroll.
+    requestAnimationFrame(() => {
+      sourceRefs.current[n]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedIdx(n);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => setHighlightedIdx(null), 1400);
+    });
+  };
+
+  const renderableContent = useMemo(
+    () => (sourceCount > 0 ? processInlineCitations(content, sourceCount) : content),
+    [content, sourceCount],
+  );
+
   return (
     <div className="flex justify-start gap-3 items-start animate-fadeUp">
       <div
@@ -56,12 +84,53 @@ export function AssistantBlock({
             <ThinkingDots />
           ) : (
             <div className="prose text-sm leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  a: ({ href, children, ...props }) => {
+                    const citationN = parseCitationHref(href);
+                    if (citationN !== null) {
+                      return (
+                        <sup>
+                          <a
+                            href={href}
+                            onClick={e => {
+                              e.preventDefault();
+                              onCitationClick(citationN);
+                            }}
+                            className="ml-0.5 px-1 rounded text-[var(--accent)] hover:bg-[var(--accent-soft)] cursor-pointer no-underline text-[10.5px] font-mono"
+                          >
+                            {children}
+                          </a>
+                        </sup>
+                      );
+                    }
+                    return (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        {...props}
+                      >
+                        {children}
+                      </a>
+                    );
+                  },
+                }}
+              >
+                {renderableContent}
+              </ReactMarkdown>
             </div>
           )}
         </div>
-        {!streaming && content && showSources && sources && sources.length > 0 && (
-          <SourcesPanel sources={sources} />
+        {hasSources && sources && (
+          <SourcesPanel
+            sources={sources}
+            open={sourcesOpen}
+            onToggle={setSourcesOpen}
+            registerSourceRef={(idx, el) => { sourceRefs.current[idx] = el; }}
+            highlightedIdx={highlightedIdx}
+          />
         )}
         {!streaming && content && (
           <ActionsBar

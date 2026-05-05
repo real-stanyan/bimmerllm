@@ -67,6 +67,10 @@ interface SearchResponse {
 interface ChatBody {
   messages: UIMessage[];
   vehicleContext?: string;
+  // Per-request override for which retrieve path to use. The Settings page
+  // wires this to the user's preference so they can A/B v1 vs v2 without
+  // redeploying. When unset/invalid, falls back to the env-based default.
+  retrievalConfig?: "v1" | "v2-dense" | "v2-hybrid";
 }
 
 // Server-only — carries the full source text for the LLM context. The public
@@ -297,7 +301,15 @@ async function pineconeInferenceRerank(
   return ranked;
 }
 
-async function retrieve(searchInput: string): Promise<RetrievedSource[]> {
+async function retrieve(
+  searchInput: string,
+  override?: ChatBody["retrievalConfig"],
+): Promise<RetrievedSource[]> {
+  // Per-request override beats env. Validate against the known set so a
+  // typo'd query param can't break retrieval; fall back to env path.
+  if (override === "v2-hybrid") return retrieveV2Hybrid(searchInput);
+  if (override === "v2-dense") return retrieveV2Dense(searchInput);
+  if (override === "v1") return retrieveV1(searchInput);
   if (USE_HYBRID) return retrieveV2Hybrid(searchInput);
   if (USE_V2) return retrieveV2Dense(searchInput);
   return retrieveV1(searchInput);
@@ -320,7 +332,7 @@ const handler = traceable(
     const currentQuestion = extractText(last);
 
     const searchInput = await reformulate(currentQuestion, history, vehicleContext);
-    const sources = await retrieve(searchInput);
+    const sources = await retrieve(searchInput, body.retrievalConfig);
 
     // Per-source slice of the full text — this is what the model sees.
     const contextText =
@@ -341,6 +353,7 @@ Answer the user's latest question based on the [Reference] block below.
 - Prefer information from the references; if the references do not cover something, explicitly say so.
 - When advice depends on the vehicle, target the vehicle context above.
 - Reply in the same language as the user's latest message (e.g. Chinese question -> Chinese reply, English question -> English reply). Do not switch language unless the user does.
+- CITE YOUR SOURCES INLINE: when you draw a fact, number, or recommendation from a [Source N] block, append \`[N]\` immediately after that statement. Use the exact source number, 1-indexed, matching the reference labels above. Multiple sources for one claim: \`[1][3]\`. Do not invent source numbers — only cite ones that actually appear in the [Reference] block.
 
 [Reference (source: bimmerpost forums)]:
 ${contextText}`;

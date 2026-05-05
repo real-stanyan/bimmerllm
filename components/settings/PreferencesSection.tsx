@@ -48,6 +48,21 @@ export function PreferencesSection() {
         <Row title="Auto-detect vehicle" sub="Infer the model from context if you don't pick one.">
           <Toggle on={prefs.autoModel} onChange={v => setPrefs({ ...prefs, autoModel: v })} />
         </Row>
+        <Divider />
+        <Row
+          title="Retrieval"
+          sub="v1 = legacy thread-level corpus. v2-dense / v2-hybrid require the post-chunked Phase 2 indexes to be populated."
+        >
+          <Segment
+            value={prefs.retrievalConfig}
+            onChange={v => setPrefs({ ...prefs, retrievalConfig: v as Preferences["retrievalConfig"] })}
+            options={[
+              { id: "v1", label: "v1" },
+              { id: "v2-dense", label: "v2 dense" },
+              { id: "v2-hybrid", label: "v2 hybrid" },
+            ]}
+          />
+        </Row>
       </div>
     </div>
   );

@@ -54,6 +54,9 @@ export function ChatPage() {
   const streamStartRef = useRef<number | null>(null);
   // vehicleContextRef lets the transport body function always see the latest value
   const vehicleContextRef = useRef(vehicleContext);
+  // Retrieval config (v1 / v2-dense / v2-hybrid) per Settings; passed on each
+  // request so the user can flip strategies without redeploying.
+  const retrievalConfigRef = useRef<string>("v1");
 
   // Keep refs stable for the Chat constructor's onFinish callback
   const activeConversationRef = useRef(activeConversation);
@@ -67,7 +70,9 @@ export function ChatPage() {
   vehicleContextRef.current = vehicleContext;
 
   useEffect(() => {
-    setShowSources(readPreferences().citations);
+    const prefs = readPreferences();
+    setShowSources(prefs.citations);
+    retrievalConfigRef.current = prefs.retrievalConfig;
   }, []);
 
   useEffect(() => {
@@ -142,7 +147,10 @@ export function ChatPage() {
   const chat = useMemo(() => {
     const transport = new DefaultChatTransport({
       api: "/api/chat",
-      body: () => ({ vehicleContext: vehicleContextRef.current ?? "Auto-detect" }),
+      body: () => ({
+        vehicleContext: vehicleContextRef.current ?? "Auto-detect",
+        retrievalConfig: retrievalConfigRef.current,
+      }),
     });
     return new Chat({
       transport,

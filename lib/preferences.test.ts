@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPreferences, writePreferences } from "./preferences";
 
 const KEY = "bimmerllm_prefs";
-const DEFAULT = { units: "metric" as const, citations: true, autoModel: true };
+const DEFAULT = {
+  units: "metric" as const,
+  citations: true,
+  autoModel: true,
+  retrievalConfig: "v1" as const,
+};
 
 // happy-dom 20 + Node 22 collide on the global `localStorage` (Node ships an
 // empty placeholder when --localstorage-file isn't set). Mock it ourselves so
@@ -36,13 +41,19 @@ describe("readPreferences", () => {
   });
 
   it("returns the parsed value when JSON is present", () => {
-    storage.setItem(KEY, JSON.stringify({ units: "imperial", citations: false, autoModel: false }));
-    expect(readPreferences()).toEqual({ units: "imperial", citations: false, autoModel: false });
+    storage.setItem(KEY, JSON.stringify({
+      units: "imperial", citations: false, autoModel: false, retrievalConfig: "v2-hybrid",
+    }));
+    expect(readPreferences()).toEqual({
+      units: "imperial", citations: false, autoModel: false, retrievalConfig: "v2-hybrid",
+    });
   });
 
   it("spreads defaults under partial JSON to fill missing fields", () => {
     storage.setItem(KEY, JSON.stringify({ units: "imperial" }));
-    expect(readPreferences()).toEqual({ units: "imperial", citations: true, autoModel: true });
+    expect(readPreferences()).toEqual({
+      units: "imperial", citations: true, autoModel: true, retrievalConfig: "v1",
+    });
   });
 
   it("returns defaults when stored JSON is malformed", () => {
@@ -53,7 +64,12 @@ describe("readPreferences", () => {
 
 describe("writePreferences", () => {
   it("round-trips through localStorage", () => {
-    const next = { units: "imperial" as const, citations: false, autoModel: true };
+    const next = {
+      units: "imperial" as const,
+      citations: false,
+      autoModel: true,
+      retrievalConfig: "v2-dense" as const,
+    };
     writePreferences(next);
     expect(JSON.parse(storage.getItem(KEY)!)).toEqual(next);
     expect(readPreferences()).toEqual(next);
