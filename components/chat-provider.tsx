@@ -53,6 +53,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const loaded = loadFromStorage();
     if (loaded.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from localStorage post-mount; lazy initializer would mismatch SSR's empty render
       setConversations(loaded);
       setActiveId(loaded[0].id);
     } else {

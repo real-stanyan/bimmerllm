@@ -12,7 +12,7 @@ interface Props {
   onClick: () => void;
 }
 
-export function ThemeSwatch({ id: _id, label, from, to, active, onClick }: Props) {
+export function ThemeSwatch({ id, label, from, to, active, onClick }: Props) {
   return (
     <button
       onClick={onClick}
@@ -21,6 +21,7 @@ export function ThemeSwatch({ id: _id, label, from, to, active, onClick }: Props
         background: "var(--bg-2)",
         border: `1px solid ${active ? "var(--accent)" : "var(--line-2)"}`,
       }}
+      aria-label={`Theme ${id}${active ? " (selected)" : ""}`}
     >
       <div
         className="h-16 rounded-md relative"

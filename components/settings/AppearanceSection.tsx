@@ -14,7 +14,11 @@ export function AppearanceSection() {
   const [theme, setTheme] = useState<Theme>("midnight");
   const [accent, setAccent] = useState<Accent>("blue");
 
-  useEffect(() => { setTheme(getStoredTheme()); setAccent(getStoredAccent()); }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate stored theme/accent post-mount; lazy init would mismatch SSR
+    setTheme(getStoredTheme());
+    setAccent(getStoredAccent());
+  }, []);
 
   const onTheme = (t: Theme) => { setTheme(t); applyTheme(t); };
   const onAccent = (a: Accent) => { setAccent(a); applyAccent(a); };
