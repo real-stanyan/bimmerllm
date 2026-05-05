@@ -28,7 +28,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat, Chat } from "@ai-sdk/react";
 import { DefaultChatTransport, type ChatOnFinishCallback, type UIMessage } from "ai";
 import { useChat as useChatStore } from "@/components/chat-provider";
-import { extractSourcesFromMessage, parseSourcesAnnotation } from "@/lib/sources";
+import { extractSourcesFromMessage, extractUsageFromMessage, parseSourcesAnnotation } from "@/lib/sources";
 import { fromAiMessage, toAiMessage, type AiUiMessage } from "@/lib/chat-bridge";
 import { readPreferences } from "@/lib/preferences";
 import { useDisplayMessages } from "@/hooks/useDisplayMessages";
@@ -99,22 +99,29 @@ export function ChatPage() {
     const latencyMs = streamStartRef.current ? finishedAt - streamStartRef.current : undefined;
     streamStartRef.current = null;
 
-    // Extract sources from the finished message's DataUIPart
+    // Extract sources + real token usage from the finished message's DataUIParts.
     const rawSources = extractSourcesFromMessage(message);
     const sources = parseSourcesAnnotation(rawSources) ?? undefined;
+    const usage = extractUsageFromMessage(message);
 
     // allAiMessages is the full conversation state after the turn completes
     // It already includes the assistant message; use it directly.
     const stored = allAiMessages.map(fromAiMessage);
 
-    // Attach latency, token estimate, and sources to the last assistant message
+    // Attach latency, real token usage, and sources to the last assistant message.
+    // Falls back to the content.length / 4 estimate only when streamText didn't
+    // emit a data-usage part (e.g. early errors).
     const lastIdx = stored.length - 1;
     if (stored[lastIdx]?.role === "model") {
+      const tokenCount =
+        usage?.outputTokens ??
+        usage?.totalTokens ??
+        Math.ceil(stored[lastIdx].content.length / 4);
       stored[lastIdx] = {
         ...stored[lastIdx],
         sources,
         latencyMs,
-        tokenCount: Math.ceil(stored[lastIdx].content.length / 4),
+        tokenCount,
       };
     }
 

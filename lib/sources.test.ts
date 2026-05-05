@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractSourcesFromMessage, parseSourcesAnnotation } from "./sources";
+import { extractSourcesFromMessage, extractUsageFromMessage, parseSourcesAnnotation } from "./sources";
 
 describe("parseSourcesAnnotation", () => {
   it("returns sources array from valid annotation", () => {
@@ -84,5 +84,60 @@ describe("extractSourcesFromMessage", () => {
       parts: [{ type: "data-sources" }], // no data
     };
     expect(extractSourcesFromMessage(message)).toBeUndefined();
+  });
+});
+
+describe("extractUsageFromMessage", () => {
+  it("returns null for non-object input", () => {
+    expect(extractUsageFromMessage(null)).toBeNull();
+    expect(extractUsageFromMessage(undefined)).toBeNull();
+    expect(extractUsageFromMessage("foo")).toBeNull();
+  });
+
+  it("returns null when message has no parts array", () => {
+    expect(extractUsageFromMessage({ role: "assistant" })).toBeNull();
+  });
+
+  it("returns null when no part is data-usage", () => {
+    const message = { role: "assistant", parts: [{ type: "text", text: "hi" }] };
+    expect(extractUsageFromMessage(message)).toBeNull();
+  });
+
+  it("extracts numeric token counts from a data-usage part", () => {
+    const message = {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "answer" },
+        {
+          type: "data-usage",
+          data: { type: "usage", inputTokens: 1234, outputTokens: 56, totalTokens: 1290 },
+        },
+      ],
+    };
+    expect(extractUsageFromMessage(message)).toEqual({
+      inputTokens: 1234,
+      outputTokens: 56,
+      totalTokens: 1290,
+    });
+  });
+
+  it("returns null fields for non-numeric token values", () => {
+    const message = {
+      role: "assistant",
+      parts: [{ type: "data-usage", data: { type: "usage", inputTokens: "x", outputTokens: null, totalTokens: undefined } }],
+    };
+    expect(extractUsageFromMessage(message)).toEqual({
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+    });
+  });
+
+  it("ignores data-usage parts whose data type is not 'usage'", () => {
+    const message = {
+      role: "assistant",
+      parts: [{ type: "data-usage", data: { type: "other", inputTokens: 1 } }],
+    };
+    expect(extractUsageFromMessage(message)).toBeNull();
   });
 });

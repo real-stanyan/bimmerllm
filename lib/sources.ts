@@ -43,3 +43,31 @@ export function extractSourcesFromMessage(message: unknown): unknown {
 
   return null;
 }
+
+export interface UsageStats {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
+// Companion to extractSourcesFromMessage — pulls the data-usage part written
+// from streamText's onFinish so the UI can show real token counts instead of
+// the content.length / 4 estimate (which is ~50% off for Chinese text).
+export function extractUsageFromMessage(message: unknown): UsageStats | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as Record<string, unknown>;
+  if (!Array.isArray(m.parts)) return null;
+
+  for (const p of m.parts) {
+    const pp = p as Record<string, unknown>;
+    if (pp.type !== "data-usage") continue;
+    const data = pp.data as Record<string, unknown> | undefined;
+    if (!data || data.type !== "usage") continue;
+    return {
+      inputTokens: typeof data.inputTokens === "number" ? data.inputTokens : null,
+      outputTokens: typeof data.outputTokens === "number" ? data.outputTokens : null,
+      totalTokens: typeof data.totalTokens === "number" ? data.totalTokens : null,
+    };
+  }
+  return null;
+}
