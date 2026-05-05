@@ -5,6 +5,10 @@ export interface SourceCitation {
   id: string;
   score: number;
   preview: string;
+  // v2 schema additions — present when the chat route reads from the
+  // bmw-datas-v2 index. Older stored sources will have these undefined.
+  url?: string;
+  title?: string;
 }
 
 export interface Message {

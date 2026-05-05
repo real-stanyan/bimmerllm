@@ -13,12 +13,16 @@ export function parseSourcesAnnotation(raw: unknown): SourceCitation[] | null {
   const r = raw as Record<string, unknown>;
   if (r.type !== "sources" || !Array.isArray(r.sources)) return null;
 
-  const valid = r.sources.filter((s): s is SourceCitation => {
-    if (!s || typeof s !== "object") return false;
+  const valid: SourceCitation[] = [];
+  for (const s of r.sources) {
+    if (!s || typeof s !== "object") continue;
     const x = s as Record<string, unknown>;
-    return typeof x.id === "string" && typeof x.score === "number" && typeof x.preview === "string";
-  });
-
+    if (typeof x.id !== "string" || typeof x.score !== "number" || typeof x.preview !== "string") continue;
+    const cite: SourceCitation = { id: x.id, score: x.score, preview: x.preview };
+    if (typeof x.url === "string" && x.url) cite.url = x.url;
+    if (typeof x.title === "string" && x.title) cite.title = x.title;
+    valid.push(cite);
+  }
   return valid;
 }
 

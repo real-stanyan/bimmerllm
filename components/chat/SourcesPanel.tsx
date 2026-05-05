@@ -26,6 +26,20 @@ export function SourcesPanel({ sources }: { sources: SourceCitation[] }) {
               <div className="font-mono text-[10.5px] text-[var(--text-3)]">
                 #{i + 1} · score {s.score.toFixed(2)} · {s.id}
               </div>
+              {s.title && (
+                s.url ? (
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[12.5px] text-[var(--text-1)] hover:text-[var(--accent)] underline decoration-[var(--line-3)] underline-offset-2 transition-colors"
+                  >
+                    {s.title}
+                  </a>
+                ) : (
+                  <span className="text-[12.5px] text-[var(--text-1)]">{s.title}</span>
+                )
+              )}
               <div className="text-[12.5px] text-[var(--text-2)] leading-relaxed">{s.preview}</div>
             </div>
           ))}
