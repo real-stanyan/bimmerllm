@@ -143,21 +143,21 @@ const handler = traceable(
     const contextText =
       sources.length > 0
         ? sources.map((s) => s.preview).join("\n\n---\n\n")
-        : "参考资料库暂时无法访问。请基于你已有的 BMW 知识谨慎回答。";
+        : "Reference knowledge base is temporarily unavailable. Answer carefully from your own BMW knowledge.";
 
     const vehicleHint =
       vehicleContext === "Auto-detect" || !vehicleContext
-        ? "用户未指定具体车型"
+        ? "no specific vehicle indicated"
         : vehicleContext;
 
-    const system = `你是一个专业的 BMW 技术顾问。
-用户车辆背景: ${vehicleHint}
-请基于下方【参考资料】回答用户的最新问题。
-- 优先依据参考资料；资料里没有的内容明确说"参考资料中未涉及"。
-- 用户车辆相关的部分要针对那个车型给具体建议。
-- 用中文回答。
+    const system = `You are an expert BMW technical advisor.
+Vehicle context: ${vehicleHint}
+Answer the user's latest question based on the [Reference] block below.
+- Prefer information from the references; if the references do not cover something, explicitly say so.
+- When advice depends on the vehicle, target the vehicle context above.
+- Reply in the same language as the user's latest message (e.g. Chinese question -> Chinese reply, English question -> English reply). Do not switch language unless the user does.
 
-【参考资料 (来源: bimmerpost 论坛)】:
+[Reference (source: bimmerpost forums)]:
 ${contextText}`;
 
     // convertToModelMessages is async in ai@6
@@ -187,7 +187,7 @@ ${contextText}`;
       },
       onError: (err) => {
         console.error("[stream] error:", err);
-        return "（回答过程中发生错误，请稍后重试）";
+        return "(An error occurred while generating the response. Please try again.)";
       },
     });
 

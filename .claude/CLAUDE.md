@@ -1,6 +1,6 @@
 # bimmerllm
 
-BMW 知识 RAG 聊天机器人。中文问答，资料来自 bimmerpost 论坛 Q&A（已灌进 Pinecone）。
+BMW 知识 RAG 聊天机器人。回答语言跟随用户输入（用户问中文回中文 / 问英文回英文），资料来自 bimmerpost 论坛 Q&A（已灌进 Pinecone）。
 
 ## Stack
 - Next.js 16 (App Router) + React 19
@@ -16,7 +16,7 @@ BMW 知识 RAG 聊天机器人。中文问答，资料来自 bimmerpost 论坛 Q
 1. 收 `messages: [{role, content}]`
 2. **Reformulate**：有历史 → Gemini 把当前问改写成 standalone **English** query；无历史 → 直接 translate 当前问到英文
 3. **Retrieve**：`pc.index("bmw-datas").namespace("bimmerpost").searchRecords({ query: { topK: 5, inputs: { text: searchInput } }, fields: ["answers"] })`
-4. **Generate**：拼中文 system prompt（要求中文回答 + 优先依据参考资料 + 结合历史）→ Gemini `llm.stream()`
+4. **Generate**：拼英文 system prompt（mirror 用户输入语言 + 优先依据参考资料 + 结合历史）→ Gemini `llm.stream()`
 5. **Stream**：纯 text encoder → `TransformStream` → `text/plain; charset=utf-8`（**不是** SSE / AI SDK protocol）
 6. 整个 handler 被 `traceable({ name: "bmw-rag-route" })` 包了一层走 LangSmith
 
