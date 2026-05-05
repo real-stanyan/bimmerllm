@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Python ingest pipeline lives outside the Next app — its venv ships
+    // bundled Playwright JS which lint should not touch.
+    "scripts/ingest/**",
   ]),
 ]);
 
