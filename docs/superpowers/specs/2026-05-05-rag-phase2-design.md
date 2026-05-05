@@ -139,9 +139,21 @@ renders them without the link (current behavior).
 2. **Wait for fetch to drain** (~16h, ~5722 threads remaining at ~350/h).
 3. **Provision new indexes** in Pinecone (`bmw-datas-v2`,
    `bmw-datas-sparse-v2`).
-4. **Run upload stage with v2 schema** against the populated sqlite. Estimated
-   ~100k chunks × Pinecone integrated embed throughput; needs measurement but
-   probably 2–4 hours.
+4. **Run upload stage with v2 schema** against the populated sqlite. Single
+   command dual-writes to both indexes — the dense and sparse indexes embed
+   the same records with their own integrated model:
+
+   ```bash
+   cd scripts/ingest
+   .venv/bin/python -m ingest --stage=upload --schema-version=2 \
+     --pinecone-index=bmw-datas-v2 \
+     --pinecone-sparse-index=bmw-datas-sparse-v2 \
+     --pinecone-namespace=bimmerpost
+   ```
+
+   A thread is marked uploaded only after BOTH targets succeed; if either
+   fails, the queue stays put and the next run retries. Estimated ~100k
+   chunks × Pinecone integrated embed throughput, probably 2–4 hours.
 5. **Eval pass** on the v2 indexes (see Eval harness below) before flipping
    chat traffic.
 6. **Flip chat route** by setting `BIMMERPOST_INDEX=bmw-datas-v2` +

@@ -87,6 +87,25 @@ def _build_pending_records_v2(conn: sqlite3.Connection, thread_id: int) -> list[
     return records
 
 
+def _upsert_with_retry(index, namespace: str, records: list[dict], label: str) -> None:
+    """3-attempt upsert with 30s backoff. Pinecone 4xx (auth/schema) is fatal."""
+    for attempt in range(3):
+        try:
+            index.upsert_records(namespace, records)
+            return
+        except Exception as e:
+            status = getattr(e, "status", None)
+            if status is not None and 400 <= status < 500 and status != 429:
+                raise
+            if attempt == 2:
+                raise
+            logger.warning(
+                "[upload:%s] batch failed (attempt %d/3): %s — sleeping 30s",
+                label, attempt + 1, e,
+            )
+            time.sleep(30)
+
+
 def run(
     conn: sqlite3.Connection,
     index,
@@ -95,12 +114,20 @@ def run(
     batch_size: int = 50,
     dry_run: bool = False,
     schema_version: int = 1,
+    extra_targets: Optional[list[tuple[object, str]]] = None,
 ) -> None:
     """Pull pending threads, build records, upsert to Pinecone in batches.
 
     schema_version=1 (default): one record per thread, v1 schema.
     schema_version=2: one record per chunk per post, v2 schema. A thread can
     fan out into many records; we still mark the *thread* uploaded as a unit.
+
+    extra_targets: list of (index, namespace) pairs to ALSO receive each
+    batch. Used for the v2 dual-write to dense + sparse indexes — both get
+    the same records and embed them with their own integrated model. A
+    thread is marked uploaded only after the primary AND every extra target
+    succeed; if any target raises, the queue stays at the same position so
+    the next run retries.
 
     On batch failure: 30s sleep + retry the same batch (idempotent via UUID).
     Pinecone 4xx is treated as fatal and re-raised."""
@@ -145,18 +172,9 @@ def run(
             logger.info(json.dumps(records[0], indent=2, ensure_ascii=False)[:2000])
             return
 
-        for attempt in range(3):
-            try:
-                index.upsert_records(namespace, records)
-                break
-            except Exception as e:
-                status = getattr(e, "status", None)
-                if status is not None and 400 <= status < 500 and status != 429:
-                    raise  # 4xx (auth, schema): fatal
-                if attempt == 2:
-                    raise
-                logger.warning("[upload] batch failed (attempt %d/3): %s — sleeping 30s", attempt + 1, e)
-                time.sleep(30)
+        _upsert_with_retry(index, namespace, records, label="primary")
+        for extra_index, extra_ns in (extra_targets or []):
+            _upsert_with_retry(extra_index, extra_ns, records, label="extra")
 
         for tid in truncated_ids:
             mark_truncated(conn, tid)

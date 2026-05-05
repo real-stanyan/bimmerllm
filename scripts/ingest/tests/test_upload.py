@@ -145,3 +145,61 @@ def test_upload_v2_skips_blank_posts(in_memory_db):
     args, kwargs = fake_index.upsert_records.call_args
     records = kwargs.get("records") or args[1]
     assert len(records) == 2  # blank post produced 0 chunks
+
+
+# ============================================================
+# v2 dual-write — Phase 2.6
+# ============================================================
+
+
+def test_upload_v2_dual_write_to_two_indexes(in_memory_db):
+    """Both dense + sparse indexes receive the same records in one run."""
+    _seed_fetched_thread(in_memory_db, thread_id=20, posts=[
+        {"post_idx": 0, "author": "u", "posted_at": None, "text": "OP body"},
+    ])
+    dense = MagicMock()
+    sparse = MagicMock()
+    upload.run(
+        in_memory_db,
+        index=dense,
+        namespace="bimmerpost",
+        batch_size=10,
+        schema_version=2,
+        extra_targets=[(sparse, "bimmerpost")],
+    )
+    dense.upsert_records.assert_called_once()
+    sparse.upsert_records.assert_called_once()
+    dense_args = dense.upsert_records.call_args
+    sparse_args = sparse.upsert_records.call_args
+    # Same records sent to both — sparse index will embed them with its own
+    # sparse model thanks to integrated embedding.
+    dense_records = dense_args.kwargs.get("records") or dense_args.args[1]
+    sparse_records = sparse_args.kwargs.get("records") or sparse_args.args[1]
+    assert dense_records == sparse_records
+
+
+def test_upload_v2_dual_write_marks_uploaded_only_after_both_succeed(in_memory_db, monkeypatch):
+    """If sparse upsert fails, the thread should NOT be marked uploaded so
+    the next run can retry both targets."""
+    _seed_fetched_thread(in_memory_db, thread_id=21)
+    # Skip the 30s retry backoff inside _upsert_with_retry — we only care
+    # about the post-condition, not real wall time.
+    monkeypatch.setattr("ingest.stages.upload.time.sleep", lambda _s: None)
+    dense = MagicMock()
+    sparse = MagicMock()
+    sparse.upsert_records.side_effect = RuntimeError("sparse boom")
+
+    with pytest.raises(RuntimeError, match="sparse boom"):
+        upload.run(
+            in_memory_db,
+            index=dense,
+            namespace="bimmerpost",
+            batch_size=10,
+            schema_version=2,
+            extra_targets=[(sparse, "bimmerpost")],
+        )
+
+    row = in_memory_db.execute(
+        "SELECT uploaded_at FROM threads WHERE thread_id=21"
+    ).fetchone()
+    assert row["uploaded_at"] is None

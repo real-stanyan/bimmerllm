@@ -63,6 +63,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         "v2 ingest typically targets 'bmw-datas-v2')")
     p.add_argument("--pinecone-namespace", default=None,
                    help="override Pinecone namespace (default from config: 'bimmerpost')")
+    p.add_argument("--pinecone-sparse-index", default=None,
+                   help="if set, dual-write each batch to this additional sparse index "
+                        "(integrated embedding model = pinecone-sparse-english-v0). "
+                        "Used by v2 hybrid retrieval; the dense + sparse indexes get "
+                        "the same records and embed them with their own model.")
+    p.add_argument("--pinecone-sparse-namespace", default=None,
+                   help="namespace for the sparse index (defaults to --pinecone-namespace)")
     return p.parse_args(argv)
 
 
@@ -125,15 +132,24 @@ def main(argv: list[str] | None = None) -> int:
 
         if run_upload:
             target_namespace = args.pinecone_namespace or PINECONE_NAMESPACE
+            extra_targets = []
             if args.dry_run:
                 class _DryIndex:
                     def upsert_records(self, namespace, records): pass
                 index = _DryIndex()
+                if args.pinecone_sparse_index:
+                    extra_targets.append((_DryIndex(),
+                                          args.pinecone_sparse_namespace or target_namespace))
             else:
                 index = _resolve_index_namespace(args.pinecone_index)
+                if args.pinecone_sparse_index:
+                    sparse_index = _resolve_index_namespace(args.pinecone_sparse_index)
+                    extra_targets.append((sparse_index,
+                                          args.pinecone_sparse_namespace or target_namespace))
             upload.run(conn, index=index, namespace=target_namespace,
                        batch_size=args.batch_size, dry_run=args.dry_run,
-                       schema_version=args.schema_version)
+                       schema_version=args.schema_version,
+                       extra_targets=extra_targets or None)
     finally:
         fetcher.close()
         conn.close()
