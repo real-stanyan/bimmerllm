@@ -8,6 +8,7 @@ export interface SourceCitation {
 }
 
 export interface Message {
+  id?: string;
   role: StorageRole;
   content: string;
   sources?: SourceCitation[];
@@ -38,11 +39,13 @@ export function migrateConversation(raw: unknown): Conversation | null {
   }
   if (typeof r.createdAt !== "string" || typeof r.updatedAt !== "string") return null;
 
-  const messages = (r.messages as unknown[]).filter((m): m is Message => {
-    if (!m || typeof m !== "object") return false;
-    const x = m as Record<string, unknown>;
-    return (x.role === "user" || x.role === "model") && typeof x.content === "string";
-  });
+  const messages = (r.messages as unknown[])
+    .filter((m): m is Message => {
+      if (!m || typeof m !== "object") return false;
+      const x = m as Record<string, unknown>;
+      return (x.role === "user" || x.role === "model") && typeof x.content === "string";
+    })
+    .map((m, idx) => (m.id ? m : { ...m, id: `legacy-${r.id}-${idx}` }));
 
   return {
     id: r.id,

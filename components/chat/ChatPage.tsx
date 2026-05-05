@@ -26,40 +26,18 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat as useAiChat, Chat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type ChatOnFinishCallback, type UIMessage } from "ai";
 import { useChat as useChatStore } from "@/components/chat-provider";
-import type { Message as StoredMessage } from "@/lib/conversation";
-import { parseSourcesAnnotation } from "@/lib/sources";
+import { extractSourcesFromMessage, parseSourcesAnnotation } from "@/lib/sources";
+import { fromAiMessage, toAiMessage, type AiUiMessage } from "@/lib/chat-bridge";
 import { readPreferences } from "@/lib/preferences";
+import { useDisplayMessages } from "@/hooks/useDisplayMessages";
 import { Topbar } from "./Topbar";
 import { Thread } from "./Thread";
 import { Welcome } from "./Welcome";
 import { Composer } from "./Composer";
 
 const DISCLAIMER = "bimmerllm references bimmerpost community knowledge. Always verify critical procedures with your service manual.";
-
-// Map storage role to AI SDK role
-function toAiMessage(m: StoredMessage, idx: number): { id: string; role: "user" | "assistant"; parts: { type: "text"; text: string }[] } {
-  return {
-    id: `legacy-${idx}`,
-    role: m.role === "model" ? "assistant" : "user",
-    parts: [{ type: "text" as const, text: m.content }],
-  };
-}
-
-interface AiUiMessage {
-  id: string;
-  role: "user" | "assistant" | "system";
-  parts: { type: string; text?: string; data?: unknown }[];
-}
-
-function fromAiMessage(m: AiUiMessage): StoredMessage {
-  const text = m.parts.filter(p => p.type === "text").map(p => p.text ?? "").join("");
-  return {
-    role: m.role === "assistant" ? "model" : "user",
-    content: text,
-  };
-}
 
 export function ChatPage() {
   const {
@@ -122,7 +100,7 @@ export function ChatPage() {
     streamStartRef.current = null;
 
     // Extract sources from the finished message's DataUIPart
-    const rawSources = extractSources(message);
+    const rawSources = extractSourcesFromMessage(message);
     const sources = parseSourcesAnnotation(rawSources) ?? undefined;
 
     // allAiMessages is the full conversation state after the turn completes
@@ -162,8 +140,7 @@ export function ChatPage() {
     return new Chat({
       transport,
       messages: initialMessages,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      onFinish: onFinish as any,
+      onFinish: onFinish as unknown as ChatOnFinishCallback<UIMessage>,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -189,26 +166,16 @@ export function ChatPage() {
     if (!activeConversation) return;
     streamStartRef.current = Date.now();
     void sendMessage({ text });
+    setInput("");
   };
 
-  // Derive displayed messages: use aiMessages if any, else fall back to stored
-  const messages: StoredMessage[] = aiMessages.length > 0
-    ? (aiMessages as AiUiMessage[]).map(fromAiMessage)
-    : (activeConversation?.messages ?? []);
-
-  // Overlay sources/latency/tokenCount from stored messages onto live view
-  // (these are only available in storage after onFinish, not in in-flight aiMessages)
   const storedMessages = activeConversation?.messages ?? [];
-  const displayMessages: StoredMessage[] = messages.map((m, i) => {
-    if (m.role !== "model") return m;
-    const stored = storedMessages[i];
-    if (!stored || stored.role !== "model") return m;
-    return { ...m, sources: stored.sources, latencyMs: stored.latencyMs, tokenCount: stored.tokenCount, thumbsUp: stored.thumbsUp, thumbsDown: stored.thumbsDown };
-  });
+  const displayMessages = useDisplayMessages(aiMessages as AiUiMessage[], storedMessages);
 
   const isEmpty = displayMessages.length === 0;
 
   const onRegenerate = () => { void regenerate(); };
+  const onRegenerateMessage = (messageId: string) => { void regenerate({ messageId }); };
 
   const onThumbsUp = (idx: number) => {
     if (!activeConversation) return;
@@ -251,7 +218,7 @@ export function ChatPage() {
               messages={displayMessages}
               streaming={streaming}
               showSources={showSources}
-              onRegenerate={onRegenerate}
+              onRegenerateMessage={onRegenerateMessage}
               onThumbsUp={onThumbsUp}
               onThumbsDown={onThumbsDown}
             />
@@ -272,30 +239,3 @@ export function ChatPage() {
   );
 }
 
-/**
- * Extract sources data from a finished AI SDK UIMessage.
- * The backend emits: writer.write({ type: "data-sources", data: { type: "sources", sources: [...] } })
- * This arrives as a DataUIPart: { type: "data-sources", data: {...} }
- */
-function extractSources(message: unknown): unknown {
-  if (!message || typeof message !== "object") return null;
-  const m = message as Record<string, unknown>;
-
-  // Primary path: DataUIPart in parts array
-  if (Array.isArray(m.parts)) {
-    for (const p of m.parts) {
-      const pp = p as Record<string, unknown>;
-      if (pp.type === "data-sources") return pp.data;
-    }
-  }
-
-  // Fallback: annotations array (older AI SDK shapes)
-  if (Array.isArray(m.annotations)) {
-    for (const a of m.annotations) {
-      const parsed = a && typeof a === "object" ? a : null;
-      if (parsed && (parsed as Record<string, unknown>).type === "sources") return parsed;
-    }
-  }
-
-  return null;
-}

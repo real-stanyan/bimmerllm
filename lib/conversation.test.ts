@@ -36,10 +36,26 @@ describe("migrateConversation", () => {
     expect(out!.model).toBe("335i • E92");
   });
 
-  it("preserves messages verbatim including role", () => {
+  it("preserves messages verbatim including role and backfills stable ids", () => {
     const out = migrateConversation(baseLegacy);
     expect(out).not.toBeNull();
-    expect(out!.messages).toEqual(baseLegacy.messages);
+    expect(out!.messages).toEqual([
+      { role: "user", content: "hi", id: "legacy-c1-0" },
+      { role: "model", content: "hello", id: "legacy-c1-1" },
+    ]);
+  });
+
+  it("keeps an existing message id rather than rewriting it", () => {
+    const withId = {
+      ...baseLegacy,
+      messages: [
+        { id: "preserved-1", role: "user", content: "hi" },
+        { role: "model", content: "hello" },
+      ],
+    };
+    const out = migrateConversation(withId);
+    expect(out!.messages[0].id).toBe("preserved-1");
+    expect(out!.messages[1].id).toBe("legacy-c1-1");
   });
 
   it("returns null for non-object input", () => {
@@ -64,7 +80,7 @@ describe("migrateConversation", () => {
     });
     expect(out).not.toBeNull();
     expect(out!.messages).toHaveLength(1);
-    expect(out!.messages[0]).toEqual({ role: "user", content: "valid" });
+    expect(out!.messages[0]).toEqual({ role: "user", content: "valid", id: "legacy-c1-0" });
   });
 });
 
