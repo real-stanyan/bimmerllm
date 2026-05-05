@@ -113,3 +113,123 @@ def test_truncate_answers_drops_trailing_then_keeps_one():
     final_size = truncate_answers_to_budget(rec)
     assert len(rec["answers"]) == 1
     assert final_size == 20_000 <= PINECONE_METADATA_BUDGET_BYTES
+
+
+# ============================================================
+# v2 schema (post-level chunked) — Phase 2
+# ============================================================
+
+import uuid as _uuid
+from ingest.record import build_record_v2, validate_record_v2
+
+
+def _v2_thread():
+    return {
+        "thread_id": 1218669,
+        "uuid": str(_uuid.uuid4()),
+        "title": "N54 HPFP cold-start hesitation",
+        "chassis": "f80",
+        "url": "https://f80.bimmerpost.com/forums/showthread.php?t=1218669",
+    }
+
+
+def test_v2_record_has_expected_fields():
+    chassis_cfg = CHASSIS_MAP["f80"]
+    rec = build_record_v2(
+        _v2_thread(),
+        post={"post_idx": 0, "posted_at": "2024-09-12T03:14:00Z"},
+        chunk_idx=0,
+        chunk_text="The HPFP started failing around 75k miles.",
+        chassis_cfg=chassis_cfg,
+    )
+    assert set(rec.keys()) >= {
+        "_id", "text",
+        "thread_id", "thread_uuid", "thread_title", "thread_url",
+        "post_idx", "chunk_idx",
+        "chassis", "models", "engines", "series",
+    }
+
+
+def test_v2_id_is_composite_uuid_post_chunk():
+    chassis_cfg = CHASSIS_MAP["f80"]
+    th = _v2_thread()
+    rec = build_record_v2(
+        th,
+        post={"post_idx": 3, "posted_at": None},
+        chunk_idx=2,
+        chunk_text="body",
+        chassis_cfg=chassis_cfg,
+    )
+    assert rec["_id"] == f"{th['uuid']}:3:2"
+
+
+def test_v2_text_is_the_embedded_field():
+    """v2 embeds `text` (the chunk body), not a synthetic 'question' string."""
+    chassis_cfg = CHASSIS_MAP["g80"]
+    rec = build_record_v2(
+        _v2_thread(),
+        post={"post_idx": 0, "posted_at": None},
+        chunk_idx=0,
+        chunk_text="Replaced HPFP at 80k. Fixed cold-start hesitation.",
+        chassis_cfg=chassis_cfg,
+    )
+    assert rec["text"] == "Replaced HPFP at 80k. Fixed cold-start hesitation."
+    assert "question" not in rec  # explicitly NOT v1 shape
+
+
+def test_v2_metadata_carries_chassis_and_url():
+    chassis_cfg = CHASSIS_MAP["f80"]
+    th = _v2_thread()
+    rec = build_record_v2(
+        th,
+        post={"post_idx": 0, "posted_at": None},
+        chunk_idx=0,
+        chunk_text="body",
+        chassis_cfg=chassis_cfg,
+    )
+    assert rec["chassis"] == "f80"
+    assert rec["models"] == ["F80", "F82", "F83"]
+    assert rec["engines"] == ["S55"]
+    assert rec["series"] == "3/4 Series"
+    assert rec["thread_url"] == th["url"]
+    assert rec["thread_title"] == th["title"]
+
+
+def test_v2_validate_passes_on_well_formed_record():
+    chassis_cfg = CHASSIS_MAP["g87"]
+    rec = build_record_v2(
+        _v2_thread(),
+        post={"post_idx": 0, "posted_at": None},
+        chunk_idx=0,
+        chunk_text="hello world",
+        chassis_cfg=chassis_cfg,
+    )
+    validate_record_v2(rec)  # should not raise
+
+
+def test_v2_validate_rejects_empty_text():
+    chassis_cfg = CHASSIS_MAP["g87"]
+    rec = build_record_v2(
+        _v2_thread(),
+        post={"post_idx": 0, "posted_at": None},
+        chunk_idx=0,
+        chunk_text="hello",
+        chassis_cfg=chassis_cfg,
+    )
+    rec["text"] = ""
+    with pytest.raises(AssertionError):
+        validate_record_v2(rec)
+
+
+def test_v2_validate_rejects_bad_id_shape():
+    chassis_cfg = CHASSIS_MAP["g87"]
+    rec = build_record_v2(
+        _v2_thread(),
+        post={"post_idx": 0, "posted_at": None},
+        chunk_idx=0,
+        chunk_text="hi",
+        chassis_cfg=chassis_cfg,
+    )
+    rec["_id"] = "not-a-composite-id"
+    with pytest.raises(AssertionError):
+        validate_record_v2(rec)
